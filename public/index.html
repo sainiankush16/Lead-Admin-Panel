@@ -655,6 +655,190 @@
             font-size: 13px;
         }
 
+        .lead-row-clickable { cursor: pointer; }
+        .lead-mobile-card { cursor: pointer; }
+        .lead-mobile-card .lead-mobile-actions a,
+        .lead-mobile-card .lead-mobile-actions .btn,
+        .lead-mobile-card .lead-mobile-status select {
+            cursor: pointer;
+        }
+
+        .lead-detail-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(17, 24, 39, .45);
+            z-index: 9000;
+            align-items: stretch;
+            justify-content: flex-end;
+        }
+
+        .lead-detail-overlay.open { display: flex; }
+
+        .lead-detail-panel {
+            width: min(440px, 100%);
+            height: 100%;
+            background: #fff;
+            box-shadow: -8px 0 30px rgba(0,0,0,.18);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .lead-detail-header {
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .lead-detail-header h2 {
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        .lead-detail-header p {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .lead-detail-body {
+            padding: 16px 18px 28px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .lead-detail-section {
+            margin-bottom: 22px;
+        }
+
+        .lead-detail-section h3 {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: .4px;
+            color: var(--muted);
+            margin-bottom: 10px;
+        }
+
+        .lead-detail-fields {
+            display: grid;
+            gap: 8px;
+        }
+
+        .lead-detail-field {
+            display: grid;
+            grid-template-columns: 110px 1fr;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .lead-detail-field span {
+            color: var(--muted);
+        }
+
+        .lead-detail-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .lead-detail-actions .btn {
+            flex: 1;
+            min-width: 120px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            height: 38px;
+        }
+
+        .remark-list, .timeline-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .remark-item, .timeline-item {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            background: #fafafa;
+        }
+
+        .remark-item p, .timeline-item p {
+            font-size: 13px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .remark-meta, .timeline-meta {
+            margin-top: 6px;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .remark-compose textarea {
+            width: 100%;
+            min-height: 72px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px;
+            font: inherit;
+            resize: vertical;
+        }
+
+        .remark-compose .btn { margin-top: 8px; }
+
+        .timeline-list {
+            position: relative;
+            padding-left: 14px;
+        }
+
+        .timeline-list::before {
+            content: "";
+            position: absolute;
+            left: 4px;
+            top: 6px;
+            bottom: 6px;
+            width: 2px;
+            background: #e5e7eb;
+        }
+
+        .timeline-item {
+            position: relative;
+            background: #fff;
+        }
+
+        .timeline-item::before {
+            content: "";
+            position: absolute;
+            left: -14px;
+            top: 14px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: 2px solid #fff;
+            box-shadow: 0 0 0 1px var(--primary);
+        }
+
+        .timeline-item strong {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .lead-detail-status select {
+            width: 100%;
+            height: 38px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0 10px;
+        }
+
         .status-badge {
             display: inline-flex;
             padding: 5px 9px;
@@ -1160,6 +1344,19 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<div class="lead-detail-overlay" id="leadDetailOverlay" aria-hidden="true">
+    <aside class="lead-detail-panel" role="dialog" aria-modal="true" aria-labelledby="leadDetailTitle">
+        <div class="lead-detail-header">
+            <div>
+                <h2 id="leadDetailTitle">Lead Details</h2>
+                <p id="leadDetailSubtitle">Project lead</p>
+            </div>
+            <button class="btn btn-light" type="button" id="leadDetailCloseBtn" aria-label="Close lead details">Close</button>
+        </div>
+        <div class="lead-detail-body" id="leadDetailBody"></div>
+    </aside>
+</div>
 
 <script src="/phone-helpers.js"></script>
 <script src="/app.js" defer></script>

@@ -27,6 +27,7 @@
   let uiBound = false;
   let loginSubmitStarted = false;
   let googleConnectStarted = false;
+  let activeLeadDetail = null;
 
   const $ = id => document.getElementById(id);
 
@@ -433,6 +434,9 @@
         renderProjectDetailStats();
         renderProjectStatusDistribution();
         filterLeads();
+        if (activeLeadDetail && Number(activeLeadDetail.rowNumber) === Number(rowNumber)) {
+          refreshLeadDetailSideData();
+        }
       } catch (err) {
         select.value = saved;
         showToast(err.message);
@@ -470,6 +474,273 @@
     disabled.title = "Phone number unavailable";
     disabled.tabIndex = -1;
     return disabled;
+  }
+
+  function formatDateTime(value) {
+    if (!value) return "";
+    const normalized = String(value).includes("T") ? String(value) : `${String(value).replace(" ", "T")}Z`;
+    const date = new Date(normalized);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleString(undefined, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  function closeLeadDetail() {
+    activeLeadDetail = null;
+    const overlay = $("leadDetailOverlay");
+    if (!overlay) return;
+    overlay.classList.remove("open");
+    overlay.setAttribute("aria-hidden", "true");
+  }
+
+  function renderRemarkItems(remarks) {
+    const list = $("leadRemarkList");
+    if (!list) return;
+    list.replaceChildren();
+    if (!remarks.length) {
+      list.innerHTML = '<div class="lead-mobile-empty">No remarks yet.</div>';
+      return;
+    }
+    remarks.forEach(remark => {
+      const item = document.createElement("div");
+      item.className = "remark-item";
+      const text = document.createElement("p");
+      text.textContent = remark.body;
+      const meta = document.createElement("div");
+      meta.className = "remark-meta";
+      meta.textContent = `${remark.author?.name || remark.author?.loginId || "User"} · ${formatDateTime(remark.createdAt)}`;
+      item.append(text, meta);
+      list.appendChild(item);
+    });
+  }
+
+  function renderTimelineItems(events) {
+    const list = $("leadTimelineList");
+    if (!list) return;
+    list.replaceChildren();
+    if (!events.length) {
+      list.innerHTML = '<div class="lead-mobile-empty">No timeline events yet.</div>';
+      return;
+    }
+    events.forEach(event => {
+      const item = document.createElement("div");
+      item.className = "timeline-item";
+      const title = document.createElement("strong");
+      title.textContent = event.eventData?.title || event.eventType;
+      item.appendChild(title);
+
+      const when = document.createElement("div");
+      when.className = "timeline-meta";
+      when.textContent = formatDateTime(event.createdAt);
+      item.appendChild(when);
+
+      const details = document.createElement("p");
+      if (event.eventType === "STATUS_CHANGED") {
+        details.textContent = `${event.eventData.fromStatus || ""} → ${event.eventData.toStatus || ""}`;
+      } else if (event.eventType === "REMARK_ADDED" || event.eventType === "REMARK_EDITED") {
+        details.textContent = event.eventData.text || "";
+      } else if (event.eventType === "LEAD_GENERATED") {
+        details.textContent = event.eventData.source ? `Source: ${event.eventData.source}` : "Imported from Google Sheets";
+      } else if (event.eventData?.notice) {
+        details.textContent = event.eventData.notice;
+      } else if (event.eventData?.reason) {
+        details.textContent = event.eventData.reason;
+      } else {
+        details.textContent = "";
+      }
+      if (details.textContent) item.appendChild(details);
+
+      const actor = document.createElement("div");
+      actor.className = "timeline-meta";
+      actor.textContent = `By: ${event.actor?.name || event.eventData?.actorLabel || event.actor?.role || "System"}`;
+      item.appendChild(actor);
+
+      if (isAdmin() && !event.isDeleted && event.eventType !== "TIMELINE_EVENT_EDITED" && event.eventType !== "TIMELINE_EVENT_DELETED") {
+        const adminActions = document.createElement("div");
+        adminActions.style.marginTop = "8px";
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "btn btn-light";
+        del.textContent = "Remove event";
+        del.addEventListener("click", async eventClick => {
+          eventClick.stopPropagation();
+          if (!window.confirm("Soft-delete this timeline event?")) return;
+          try {
+            await api(`/api/projects/${activeLeadDetail.projectId}/timeline/${event.id}`, { method: "DELETE" });
+            await refreshLeadDetailSideData();
+            showToast("Timeline event removed.");
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+        adminActions.appendChild(del);
+        item.appendChild(adminActions);
+      }
+
+      list.appendChild(item);
+    });
+  }
+
+  async function refreshLeadDetailSideData() {
+    if (!activeLeadDetail) return;
+    try {
+      const [remarksRes, timelineRes] = await Promise.all([
+        api(`/api/projects/${activeLeadDetail.projectId}/leads/${activeLeadDetail.leadId}/remarks`),
+        api(`/api/projects/${activeLeadDetail.projectId}/leads/${activeLeadDetail.leadId}/timeline`)
+      ]);
+      renderRemarkItems(remarksRes.remarks || []);
+      renderTimelineItems(timelineRes.events || []);
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  async function submitLeadRemark() {
+    if (!activeLeadDetail) return;
+    const input = $("leadRemarkInput");
+    const body = input?.value || "";
+    if (!body.trim()) {
+      showToast("Enter a remark.");
+      return;
+    }
+    showLoading("Saving remark...");
+    try {
+      const result = await api(`/api/projects/${activeLeadDetail.projectId}/leads/${activeLeadDetail.leadId}/remarks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body })
+      });
+      input.value = "";
+      renderRemarkItems(result.remarks || []);
+      renderTimelineItems(result.events || []);
+      showToast("Remark added.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function openLeadDetail(rowNumber) {
+    const cached = activeProject();
+    if (!cached || !rowNumber) return;
+    const index = (cached.rowNumbers || []).indexOf(Number(rowNumber));
+    if (index < 0) return;
+    const lead = cached.leads[index];
+    if (!lead) return;
+
+    activeLeadDetail = { projectId: cached.id, leadId: String(rowNumber), rowNumber: Number(rowNumber) };
+    const helpers = phoneHelpers();
+    const columns = cached.columns || [];
+    const nameCol = helpers.findNameColumn ? helpers.findNameColumn(columns) : findColumn(columns, "Name");
+    const phoneCol = helpers.findPhoneColumn ? helpers.findPhoneColumn(columns) : findColumn(columns, "Phone");
+    const statusCol = statusColumn(columns);
+    const nameText = nameCol ? String(lead[nameCol] ?? "").trim() : "Lead";
+    const phoneText = phoneCol ? String(lead[phoneCol] ?? "").trim() : "";
+    const links = helpers.normalizePhoneForLinks ? helpers.normalizePhoneForLinks(phoneText) : null;
+
+    $("leadDetailTitle").textContent = nameText || "Lead Details";
+    $("leadDetailSubtitle").textContent = `${cached.name} · Row ${rowNumber}`;
+
+    const body = $("leadDetailBody");
+    body.replaceChildren();
+
+    const fieldsSection = document.createElement("section");
+    fieldsSection.className = "lead-detail-section";
+    fieldsSection.innerHTML = "<h3>Lead Information</h3>";
+    const fields = document.createElement("div");
+    fields.className = "lead-detail-fields";
+    columns.forEach(column => {
+      if (statusCol && column === statusCol) return;
+      const row = document.createElement("div");
+      row.className = "lead-detail-field";
+      const label = document.createElement("span");
+      label.textContent = column;
+      const value = document.createElement("strong");
+      value.textContent = String(lead[column] ?? "");
+      row.append(label, value);
+      fields.appendChild(row);
+    });
+    fieldsSection.appendChild(fields);
+    body.appendChild(fieldsSection);
+
+    const actionsSection = document.createElement("section");
+    actionsSection.className = "lead-detail-section";
+    actionsSection.innerHTML = "<h3>Contact</h3>";
+    const actions = document.createElement("div");
+    actions.className = "lead-detail-actions";
+    actions.appendChild(createContactAction({
+      href: links?.telHref || null,
+      label: "☎ Call Now",
+      ariaLabel: `Call ${nameText || "lead"}`,
+      className: "btn-light"
+    }));
+    actions.appendChild(createContactAction({
+      href: links?.waHref || null,
+      label: "WhatsApp",
+      ariaLabel: `WhatsApp ${nameText || "lead"}`,
+      className: "btn-primary"
+    }));
+    actionsSection.appendChild(actions);
+    body.appendChild(actionsSection);
+
+    const remarksSection = document.createElement("section");
+    remarksSection.className = "lead-detail-section";
+    remarksSection.innerHTML = "<h3>Remarks</h3>";
+    const remarkList = document.createElement("div");
+    remarkList.className = "remark-list";
+    remarkList.id = "leadRemarkList";
+    remarksSection.appendChild(remarkList);
+    const compose = document.createElement("div");
+    compose.className = "remark-compose";
+    const textarea = document.createElement("textarea");
+    textarea.id = "leadRemarkInput";
+    textarea.maxLength = 2000;
+    textarea.placeholder = "Add a remark...";
+    const submitBtn = document.createElement("button");
+    submitBtn.className = "btn btn-primary";
+    submitBtn.type = "button";
+    submitBtn.id = "leadRemarkSubmitBtn";
+    submitBtn.textContent = "Add Remark";
+    submitBtn.addEventListener("click", () => { submitLeadRemark(); });
+    compose.append(textarea, submitBtn);
+    remarksSection.appendChild(compose);
+    body.appendChild(remarksSection);
+
+    const timelineSection = document.createElement("section");
+    timelineSection.className = "lead-detail-section";
+    timelineSection.innerHTML = "<h3>Lead Timeline</h3>";
+    const timelineList = document.createElement("div");
+    timelineList.className = "timeline-list";
+    timelineList.id = "leadTimelineList";
+    timelineSection.appendChild(timelineList);
+    body.appendChild(timelineSection);
+
+    const statusSection = document.createElement("section");
+    statusSection.className = "lead-detail-section lead-detail-status";
+    statusSection.innerHTML = "<h3>Lead Status</h3>";
+    if (statusCol) {
+      const statusHost = document.createElement("div");
+      statusSection.appendChild(statusHost);
+      statusHost.appendChild(buildStatusSelect(lead, statusCol, Number(rowNumber), statusHost));
+    } else {
+      const missing = document.createElement("p");
+      missing.className = "lead-mobile-phone";
+      missing.textContent = "Lead Status column not found";
+      statusSection.appendChild(missing);
+    }
+    body.appendChild(statusSection);
+
+    const overlay = $("leadDetailOverlay");
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden", "false");
+
+    await refreshLeadDetailSideData();
   }
 
   function renderLeadMobileCards(leads) {
@@ -550,6 +821,20 @@
       }
       card.appendChild(statusWrap);
 
+      card.addEventListener("click", event => {
+        if (event.target.closest("a, button, select, textarea, input, label")) return;
+        openLeadDetail(rowNumber);
+      });
+      card.setAttribute("role", "button");
+      card.tabIndex = 0;
+      card.setAttribute("aria-label", `Open details for ${displayName}`);
+      card.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openLeadDetail(rowNumber);
+        }
+      });
+
       list.appendChild(card);
     });
   }
@@ -579,6 +864,19 @@
 
     leads.forEach(({ lead, rowNumber }) => {
       const row = document.createElement("tr");
+      row.className = "lead-row-clickable";
+      row.setAttribute("role", "button");
+      row.tabIndex = 0;
+      row.addEventListener("click", event => {
+        if (event.target.closest("select, a, button, input")) return;
+        openLeadDetail(rowNumber);
+      });
+      row.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openLeadDetail(rowNumber);
+        }
+      });
       columns.forEach(column => {
         const cell = document.createElement("td");
         if (statusCol && column === statusCol) {
@@ -1374,6 +1672,16 @@
     };
 
     on("loginSubmitBtn", "click", () => { passwordLogin(); });
+    on("leadDetailCloseBtn", "click", closeLeadDetail);
+    const leadOverlay = $("leadDetailOverlay");
+    if (leadOverlay) {
+      leadOverlay.addEventListener("click", event => {
+        if (event.target === leadOverlay) closeLeadDetail();
+      });
+    }
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") closeLeadDetail();
+    });
     on("loginForm", "submit", event => {
       event.preventDefault();
       passwordLogin();

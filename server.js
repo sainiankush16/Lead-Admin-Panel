@@ -46,6 +46,24 @@ const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-dat
 const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
 const { buildSyncSnapshot, compareSheetToSnapshot, syncInProgressGuard } = require("./sync-snapshot");
 const {
+  TIMELINE_EVENT_TYPES,
+  leadIdFromRowNumber,
+  recordLeadGeneratedForRows,
+  recordStatusChangedEvent,
+  listTimelineEvents,
+  getTimelineEvent,
+  adminEditTimelineEvent,
+  adminSoftDeleteTimelineEvent,
+  rejectProjectUserTimelineMutation
+} = require("./lead-timeline");
+const {
+  listRemarks,
+  createRemark,
+  editRemark,
+  softDeleteRemark,
+  getRemark
+} = require("./lead-remarks");
+const {
   getAuthUrl, exchangeCode, clientFromRefreshToken, getGoogleProfile,
   listSpreadsheets, getTabs, readSheet, writeLeadStatus, createLeadStatusColumn
 } = require("./google");
@@ -313,6 +331,19 @@ async function syncProject(connection, project) {
     SET columns_json = ?, sync_snapshot_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?`)
     .run(JSON.stringify(data.columns), JSON.stringify(comparison.snapshot), project.id);
+
+  if (Array.isArray(comparison.newRowNumbers) && comparison.newRowNumbers.length) {
+    const indexes = comparison.newRowNumbers.map(rowNumber => data.rowNumbers.indexOf(rowNumber));
+    const newLeads = indexes.map((index, i) => (index >= 0 ? data.leads[index] : {}));
+    await recordLeadGeneratedForRows(db, {
+      projectId: project.id,
+      rowNumbers: comparison.newRowNumbers,
+      leads: newLeads,
+      columns: data.columns,
+      projectName: project.name
+    });
+  }
+
   const fresh = await loadProjectById(project.id);
   return {
     project: projectWithLeads(fresh, data),
@@ -665,6 +696,13 @@ app.post("/api/projects", requireAdmin, csrfProtection, async (req, res) => {
       );
     const project = await db.prepare("SELECT * FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
       .get(connection.id, spreadsheetId, tab.sheetId);
+    await recordLeadGeneratedForRows(db, {
+      projectId: project.id,
+      rowNumbers: data.rowNumbers,
+      leads: data.leads,
+      columns: data.columns,
+      projectName: project.name
+    });
     res.status(201).json({ project: sanitizeProject(project) });
   } catch (err) {
     sendGoogleError(res, "Unable to create project", err);
@@ -724,7 +762,25 @@ app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtecti
     if (planned.error) return res.status(planned.statusCode).json({ error: planned.error });
 
     const { spreadsheetId, sheetTitle, columnIndex, rowNumber, status } = planned.value;
+    const statusCol = findLeadStatusColumn(sheetData.columns || []);
+    const leadIndex = (sheetData.rowNumbers || []).indexOf(rowNumber);
+    const previousStatus = statusCol && leadIndex >= 0
+      ? (String(sheetData.leads[leadIndex]?.[statusCol] ?? "").trim() || "New")
+      : "New";
+
     await writeLeadStatus(client, spreadsheetId, sheetTitle, columnIndex, rowNumber, status);
+
+    const leadId = leadIdFromRowNumber(rowNumber);
+    if (leadId && previousStatus !== status) {
+      await recordStatusChangedEvent(db, {
+        projectId: project.id,
+        leadId,
+        fromStatus: previousStatus,
+        toStatus: status,
+        actor: req.user
+      });
+    }
+
     res.json({
       ok: true,
       rowNumber,
@@ -733,6 +789,175 @@ app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtecti
     });
   } catch (err) {
     sendGoogleError(res, "Unable to update lead status", err);
+  }
+});
+
+/* -------------------- LEAD REMARKS + TIMELINE -------------------- */
+
+function parseLeadParam(value) {
+  return leadIdFromRowNumber(value) || (String(value || "").trim() || null);
+}
+
+app.get("/api/projects/:id/leads/:leadId/timeline", requireAuth, async (req, res, next) => {
+  try {
+    const projectId = positiveId(req.params.id);
+    const leadId = parseLeadParam(req.params.leadId);
+    if (!projectId || !leadId) return res.status(400).json({ error: "Invalid project or lead id." });
+    const authorized = await loadAuthorizedProject(req.user, projectId);
+    if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
+    const includeDeleted = req.user.role === ROLES.ADMIN && req.query.includeDeleted === "1";
+    const events = await listTimelineEvents(db, { projectId, leadId, includeDeleted });
+    res.json({ events });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch("/api/projects/:id/timeline/:eventId", requireAdmin, csrfProtection, async (req, res, next) => {
+  try {
+    const projectId = positiveId(req.params.id);
+    const eventId = positiveId(req.params.eventId);
+    if (!projectId || !eventId) return res.status(400).json({ error: "Invalid project or event id." });
+    // Reject spoofed actor/timestamp fields from clients.
+    if (req.body && ["createdAt", "created_at", "actorUserId", "userId", "role", "actor_user_id"].some(key => key in req.body)) {
+      return res.status(403).json({ error: "Not authorized." });
+    }
+    const result = await adminEditTimelineEvent(db, {
+      eventId,
+      projectId,
+      newEventData: req.body?.eventData,
+      reason: req.body?.reason,
+      adminUser: req.user
+    });
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    const existing = await getTimelineEvent(db, eventId);
+    const events = existing
+      ? await listTimelineEvents(db, { projectId, leadId: existing.lead_id })
+      : [];
+    res.json({ ok: true, events });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/api/projects/:id/timeline/:eventId", requireAuth, csrfProtection, async (req, res, next) => {
+  try {
+    if (req.user.role !== ROLES.ADMIN) {
+      const denied = rejectProjectUserTimelineMutation();
+      return res.status(denied.statusCode).json({ error: denied.error });
+    }
+    const projectId = positiveId(req.params.id);
+    const eventId = positiveId(req.params.eventId);
+    if (!projectId || !eventId) return res.status(400).json({ error: "Invalid project or event id." });
+    const result = await adminSoftDeleteTimelineEvent(db, {
+      eventId,
+      projectId,
+      adminUser: req.user
+    });
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Project users cannot mutate timeline via generic create.
+app.post("/api/projects/:id/leads/:leadId/timeline", requireAuth, csrfProtection, async (req, res) => {
+  const denied = rejectProjectUserTimelineMutation();
+  return res.status(denied.statusCode).json({ error: denied.error });
+});
+
+app.get("/api/projects/:id/leads/:leadId/remarks", requireAuth, async (req, res, next) => {
+  try {
+    const projectId = positiveId(req.params.id);
+    const leadId = parseLeadParam(req.params.leadId);
+    if (!projectId || !leadId) return res.status(400).json({ error: "Invalid project or lead id." });
+    const authorized = await loadAuthorizedProject(req.user, projectId);
+    if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
+    res.json({ remarks: await listRemarks(db, { projectId, leadId }) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/projects/:id/leads/:leadId/remarks", requireAuth, csrfProtection, async (req, res, next) => {
+  try {
+    const projectId = positiveId(req.params.id);
+    const leadId = parseLeadParam(req.params.leadId);
+    if (!projectId || !leadId) return res.status(400).json({ error: "Invalid project or lead id." });
+    const authorized = await loadAuthorizedProject(req.user, projectId);
+    if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
+    if (req.body && ["createdAt", "created_at", "actorUserId", "userId", "authorUserId"].some(key => key in req.body)) {
+      return res.status(403).json({ error: "Not authorized." });
+    }
+    const result = await createRemark(db, {
+      projectId,
+      leadId,
+      body: req.body?.body,
+      actor: req.user
+    });
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    res.status(201).json({
+      remark: result.value,
+      remarks: await listRemarks(db, { projectId, leadId }),
+      events: await listTimelineEvents(db, { projectId, leadId })
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch("/api/projects/:id/remarks/:remarkId", requireAuth, csrfProtection, async (req, res, next) => {
+  try {
+    const projectId = positiveId(req.params.id);
+    const remarkId = positiveId(req.params.remarkId);
+    if (!projectId || !remarkId) return res.status(400).json({ error: "Invalid project or remark id." });
+    const authorized = await loadAuthorizedProject(req.user, projectId);
+    if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
+    if (req.body && ["createdAt", "created_at", "actorUserId", "userId"].some(key => key in req.body)) {
+      return res.status(403).json({ error: "Not authorized." });
+    }
+    const result = await editRemark(db, {
+      remarkId,
+      projectId,
+      body: req.body?.body,
+      actor: req.user,
+      isAdmin: req.user.role === ROLES.ADMIN
+    });
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    res.json({
+      remark: result.value,
+      remarks: await listRemarks(db, { projectId, leadId: result.value.leadId }),
+      events: await listTimelineEvents(db, { projectId, leadId: result.value.leadId })
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/api/projects/:id/remarks/:remarkId", requireAuth, csrfProtection, async (req, res, next) => {
+  try {
+    const projectId = positiveId(req.params.id);
+    const remarkId = positiveId(req.params.remarkId);
+    if (!projectId || !remarkId) return res.status(400).json({ error: "Invalid project or remark id." });
+    const authorized = await loadAuthorizedProject(req.user, projectId);
+    if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
+    const existing = await getRemark(db, remarkId);
+    const result = await softDeleteRemark(db, {
+      remarkId,
+      projectId,
+      actor: req.user,
+      isAdmin: req.user.role === ROLES.ADMIN
+    });
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    const leadId = existing?.lead_id;
+    res.json({
+      ok: true,
+      remarks: leadId ? await listRemarks(db, { projectId, leadId }) : [],
+      events: leadId ? await listTimelineEvents(db, { projectId, leadId }) : []
+    });
+  } catch (err) {
+    next(err);
   }
 });
 

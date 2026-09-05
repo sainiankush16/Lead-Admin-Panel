@@ -64,6 +64,47 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS project_user_assignments_user_idx ON project_user_assignments(user_id);
   CREATE INDEX IF NOT EXISTS project_user_assignments_project_idx ON project_user_assignments(project_id);
+
+  CREATE TABLE IF NOT EXISTS lead_timeline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    lead_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data TEXT NOT NULL DEFAULT '{}',
+    actor_user_id INTEGER,
+    actor_role TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    deleted_by INTEGER,
+    deleted_at TEXT,
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(actor_user_id) REFERENCES app_users(id) ON DELETE SET NULL,
+    FOREIGN KEY(deleted_by) REFERENCES app_users(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS lead_timeline_project_idx ON lead_timeline_events(project_id);
+  CREATE INDEX IF NOT EXISTS lead_timeline_lead_idx ON lead_timeline_events(project_id, lead_id);
+  CREATE INDEX IF NOT EXISTS lead_timeline_created_idx ON lead_timeline_events(created_at);
+
+  CREATE TABLE IF NOT EXISTS lead_remarks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    lead_id TEXT NOT NULL,
+    body TEXT NOT NULL,
+    author_user_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    deleted_by INTEGER,
+    deleted_at TEXT,
+    FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    FOREIGN KEY(author_user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+    FOREIGN KEY(deleted_by) REFERENCES app_users(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS lead_remarks_project_lead_idx ON lead_remarks(project_id, lead_id);
+  CREATE INDEX IF NOT EXISTS lead_remarks_created_idx ON lead_remarks(created_at);
 `;
 
 function tursoConfig() {
