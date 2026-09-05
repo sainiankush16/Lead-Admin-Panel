@@ -654,7 +654,7 @@
         <div class="login-logo">L</div>
         <h1>Lead Admin Panel</h1>
         <p>Manage all your project leads from one place. Sign in with your authorized Google account to access connected spreadsheets.</p>
-        <button class="google-login-btn" type="button" onclick="googleLogin()">
+        <button class="google-login-btn" type="button" id="googleLoginBtn">
             <span class="google-icon">G</span>
             Continue with Google
         </button>
@@ -677,23 +677,23 @@
         </div>
 
         <div class="menu-title">Dashboard</div>
-        <div class="nav-item active" data-view="dashboard" onclick="showView('dashboard', this)">
+        <div class="nav-item active" data-view="dashboard" data-action="nav" role="button" tabindex="0">
             <span class="nav-icon">▦</span> Dashboard
         </div>
-        <div class="nav-item" data-view="projects" onclick="showView('projects', this)">
+        <div class="nav-item" data-view="projects" data-action="nav" role="button" tabindex="0">
             <span class="nav-icon">▣</span> Projects
         </div>
 
         <div class="menu-title">Management</div>
-        <div class="nav-item" data-view="connections" onclick="showView('connections', this)">
+        <div class="nav-item" data-view="connections" data-action="nav" role="button" tabindex="0">
             <span class="nav-icon">🔗</span> Google Sheets
         </div>
-        <div class="nav-item" data-view="allLeads" onclick="showView('allLeads', this)">
+        <div class="nav-item" data-view="allLeads" data-action="nav" role="button" tabindex="0">
             <span class="nav-icon">☷</span> All Leads
         </div>
 
         <div class="menu-title">Account</div>
-        <div class="nav-item" onclick="logout()">
+        <div class="nav-item" data-action="logout" role="button" tabindex="0">
             <span class="nav-icon">↪</span> Logout
         </div>
 
@@ -711,7 +711,7 @@
     <main class="main">
         <header class="topbar">
             <div style="display:flex;align-items:center;gap:12px;">
-                <button class="mobile-menu" type="button" onclick="toggleSidebar()">☰</button>
+                <button class="mobile-menu" type="button" id="mobileMenuBtn">☰</button>
                 <div class="page-title">
                     <h2 id="pageTitle">Dashboard</h2>
                     <span id="pageSubtitle">All projects overview</span>
@@ -722,7 +722,7 @@
                     <span class="sync-dot"></span>
                     <span id="syncText">Not synced yet</span>
                 </div>
-                <button class="btn btn-light" type="button" id="syncAllBtn" onclick="syncAllSheets()">↻ Sync</button>
+                <button class="btn btn-light" type="button" id="syncAllBtn">↻ Sync</button>
             </div>
         </header>
 
@@ -786,7 +786,7 @@
                 <div class="panel">
                     <div class="panel-header">
                         <h3>Projects</h3>
-                        <button class="btn btn-primary" type="button" onclick="showView('connections')">+ Add Project</button>
+                        <button class="btn btn-primary" type="button" id="addProjectFromDashboardBtn">+ Add Project</button>
                     </div>
                     <div class="panel-body">
                         <div class="projects-grid" id="dashboardProjects"></div>
@@ -803,7 +803,7 @@
             </div>
 
             <div class="view" id="projectDetailView">
-                <button class="btn btn-light back-btn" type="button" onclick="showView('projects')">← Back to Projects</button>
+                <button class="btn btn-light back-btn" type="button" id="backToProjectsBtn">← Back to Projects</button>
 
                 <div class="project-banner">
                     <h1 id="detailProjectName">Project</h1>
@@ -819,9 +819,9 @@
                 </div>
 
                 <div class="detail-actions">
-                    <button class="btn btn-primary" type="button" id="detailSyncBtn" onclick="syncCurrentProject()">↻ Sync Now</button>
-                    <button class="btn btn-light" type="button" id="detailRefreshBtn" onclick="refreshCurrentProject()">Refresh</button>
-                    <button class="btn btn-light hidden" type="button" id="addStatusColumnBtn" onclick="addLeadStatusColumn()">Add Lead Status column</button>
+                    <button class="btn btn-primary" type="button" id="detailSyncBtn">↻ Sync Now</button>
+                    <button class="btn btn-light" type="button" id="detailRefreshBtn">Refresh</button>
+                    <button class="btn btn-light hidden" type="button" id="addStatusColumnBtn">Add Lead Status column</button>
                 </div>
 
                 <div class="status-warning hidden" id="statusColumnWarning">
@@ -836,15 +836,15 @@
 
                 <div class="toolbar">
                     <div class="search-box">
-                        <input type="search" id="leadSearch" placeholder="Search all lead data..." oninput="filterLeads()">
+                        <input type="search" id="leadSearch" placeholder="Search all lead data...">
                     </div>
-                    <select id="statusFilter" onchange="filterLeads()">
+                    <select id="statusFilter">
                         <option value="">All Status</option>
                     </select>
-                    <select id="sourceFilter" class="hidden" onchange="filterLeads()">
+                    <select id="sourceFilter" class="hidden">
                         <option value="">All Sources</option>
                     </select>
-                    <button class="btn btn-light" type="button" onclick="clearFilters()">Clear</button>
+                    <button class="btn btn-light" type="button" id="clearFiltersBtn">Clear</button>
                 </div>
 
                 <div class="table-panel">
@@ -864,12 +864,12 @@
                 </div>
                 <div class="toolbar">
                     <div class="search-box">
-                        <input type="search" id="allLeadSearch" placeholder="Search all leads..." oninput="filterAllLeads()">
+                        <input type="search" id="allLeadSearch" placeholder="Search all leads...">
                     </div>
-                    <select id="allProjectFilter" onchange="filterAllLeads()">
+                    <select id="allProjectFilter">
                         <option value="">All Projects</option>
                     </select>
-                    <select id="allStatusFilter" onchange="filterAllLeads()">
+                    <select id="allStatusFilter">
                         <option value="">All Status</option>
                     </select>
                 </div>
@@ -913,7 +913,7 @@
                                 <option value="">Select spreadsheet first</option>
                             </select>
                         </div>
-                        <button class="btn btn-primary" type="button" id="saveProjectBtn" onclick="saveProjectConnection()">Connect &amp; Save Project</button>
+                        <button class="btn btn-primary" type="button" id="saveProjectBtn">Connect &amp; Save Project</button>
                     </div>
                 </div>
 

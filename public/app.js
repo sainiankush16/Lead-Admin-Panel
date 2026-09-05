@@ -231,7 +231,7 @@
     const newCount = countStatus(counts, "New");
     const initials = projectInitials(project.name);
 
-    return `<div class="project-card" data-project-id="${project.id}" onclick="openProject(${project.id})">
+    return `<div class="project-card" data-project-id="${project.id}" data-action="open-project" role="button" tabindex="0">
       <div class="project-head">
         <div class="project-logo">${escapeHTML(initials)}</div>
       </div>
@@ -350,7 +350,7 @@
     select.value = saved;
     if (!rowNumber) select.disabled = true;
 
-    select.onchange = async () => {
+    select.addEventListener("change", async () => {
       const nextStatus = select.value;
       if (nextStatus === saved) return;
       select.disabled = true;
@@ -375,7 +375,7 @@
         row.classList.remove("row-updating");
         select.disabled = !rowNumber;
       }
-    };
+    });
     return select;
   }
 
@@ -578,7 +578,7 @@
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
           <span class="connected">● Connected</span>
-          <button class="btn btn-danger" type="button" onclick="removeProject(${project.id})">Remove</button>
+          <button class="btn btn-danger" type="button" data-action="remove-project" data-project-id="${project.id}">Remove</button>
         </div>
       </div>
     `).join("");
@@ -813,7 +813,12 @@
     if (target) target.classList.add("active");
 
     document.querySelectorAll(".nav-item[data-view]").forEach(item => item.classList.remove("active"));
-    if (element) element.classList.add("active");
+    if (element) {
+      element.classList.add("active");
+    } else {
+      const nav = document.querySelector(`.nav-item[data-view="${viewName}"]`);
+      if (nav) nav.classList.add("active");
+    }
 
     if (VIEW_TITLES[viewName]) {
       $("pageTitle").textContent = VIEW_TITLES[viewName][0];
@@ -918,6 +923,76 @@
     location.assign("/");
   }
 
+  function bindUi() {
+    const on = (id, event, handler) => {
+      const node = $(id);
+      if (node) node.addEventListener(event, handler);
+    };
+
+    on("googleLoginBtn", "click", googleLogin);
+    on("mobileMenuBtn", "click", toggleSidebar);
+    on("syncAllBtn", "click", () => { syncAllSheets(); });
+    on("addProjectFromDashboardBtn", "click", () => showView("connections"));
+    on("backToProjectsBtn", "click", () => showView("projects"));
+    on("detailSyncBtn", "click", () => { syncCurrentProject(); });
+    on("detailRefreshBtn", "click", () => { refreshCurrentProject(); });
+    on("addStatusColumnBtn", "click", () => { addLeadStatusColumn(); });
+    on("leadSearch", "input", filterLeads);
+    on("statusFilter", "change", filterLeads);
+    on("sourceFilter", "change", filterLeads);
+    on("clearFiltersBtn", "click", clearFilters);
+    on("allLeadSearch", "input", filterAllLeads);
+    on("allProjectFilter", "change", filterAllLeads);
+    on("allStatusFilter", "change", filterAllLeads);
+    on("saveProjectBtn", "click", () => { saveProjectConnection(); });
+    on("spreadsheetSelect", "change", onSpreadsheetChange);
+    on("sheetSelect", "change", onTabChange);
+
+    document.querySelectorAll(".nav-item[data-action='nav']").forEach(item => {
+      item.addEventListener("click", () => showView(item.dataset.view, item));
+      item.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          showView(item.dataset.view, item);
+        }
+      });
+    });
+
+    const logoutNav = document.querySelector(".nav-item[data-action='logout']");
+    if (logoutNav) {
+      logoutNav.addEventListener("click", () => { logout(); });
+      logoutNav.addEventListener("keydown", event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          logout();
+        }
+      });
+    }
+
+    document.addEventListener("click", event => {
+      const openCard = event.target.closest("[data-action='open-project']");
+      if (openCard) {
+        const id = Number(openCard.dataset.projectId);
+        if (id) openProject(id);
+        return;
+      }
+      const removeBtn = event.target.closest("[data-action='remove-project']");
+      if (removeBtn) {
+        const id = Number(removeBtn.dataset.projectId);
+        if (id) removeProject(id);
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const openCard = event.target.closest("[data-action='open-project']");
+      if (!openCard || event.target !== openCard) return;
+      event.preventDefault();
+      const id = Number(openCard.dataset.projectId);
+      if (id) openProject(id);
+    });
+  }
+
   async function init() {
     try {
       const auth = await api("/api/auth/me");
@@ -938,24 +1013,8 @@
     }
   }
 
-  window.googleLogin = googleLogin;
-  window.logout = logout;
-  window.showView = showView;
-  window.toggleSidebar = toggleSidebar;
-  window.syncAllSheets = syncAllSheets;
-  window.openProject = openProject;
-  window.filterLeads = filterLeads;
-  window.clearFilters = clearFilters;
-  window.filterAllLeads = filterAllLeads;
-  window.saveProjectConnection = saveProjectConnection;
-  window.removeProject = removeProject;
-  window.syncCurrentProject = syncCurrentProject;
-  window.refreshCurrentProject = refreshCurrentProject;
-  window.addLeadStatusColumn = addLeadStatusColumn;
-
   document.addEventListener("DOMContentLoaded", () => {
-    $("spreadsheetSelect").addEventListener("change", onSpreadsheetChange);
-    $("sheetSelect").addEventListener("change", onTabChange);
+    bindUi();
     init();
   });
 })();
