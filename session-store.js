@@ -1,3 +1,5 @@
+"use strict";
+
 const session = require("express-session");
 
 class SQLiteSessionStore extends session.Store {
@@ -6,21 +8,23 @@ class SQLiteSessionStore extends session.Store {
     this.db = db;
     this.ttl = ttl;
     this.writes = 0;
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        sid TEXT PRIMARY KEY,
-        sess TEXT NOT NULL,
-        expires_at INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
-    `);
-    this.getSession = db.prepare("SELECT sess FROM sessions WHERE sid = ? AND expires_at > ?");
-    this.setSession = db.prepare(`
-      INSERT INTO sessions (sid, sess, expires_at) VALUES (?, ?, ?)
-      ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expires_at = excluded.expires_at
-    `);
-    this.destroySession = db.prepare("DELETE FROM sessions WHERE sid = ?");
-    this.clearExpired = db.prepare("DELETE FROM sessions WHERE expires_at <= ?");
+    this.ready = Promise.resolve(db.ready).then(async () => {
+      await db.exec(`
+        CREATE TABLE IF NOT EXISTS sessions (
+          sid TEXT PRIMARY KEY,
+          sess TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
+      `);
+      this.getSession = db.prepare("SELECT sess FROM sessions WHERE sid = ? AND expires_at > ?");
+      this.setSession = db.prepare(`
+        INSERT INTO sessions (sid, sess, expires_at) VALUES (?, ?, ?)
+        ON CONFLICT(sid) DO UPDATE SET sess = excluded.sess, expires_at = excluded.expires_at
+      `);
+      this.destroySession = db.prepare("DELETE FROM sessions WHERE sid = ?");
+      this.clearExpired = db.prepare("DELETE FROM sessions WHERE expires_at <= ?");
+    });
   }
 
   expiresAt(sess) {
@@ -29,32 +33,26 @@ class SQLiteSessionStore extends session.Store {
   }
 
   get(sid, callback) {
-    try {
-      const row = this.getSession.get(sid, Date.now());
+    this.ready.then(async () => {
+      const row = await this.getSession.get(sid, Date.now());
       callback(null, row ? JSON.parse(row.sess) : null);
-    } catch (err) {
-      callback(err);
-    }
+    }).catch(callback);
   }
 
   set(sid, sess, callback = () => {}) {
-    try {
-      this.setSession.run(sid, JSON.stringify(sess), this.expiresAt(sess));
+    this.ready.then(async () => {
+      await this.setSession.run(sid, JSON.stringify(sess), this.expiresAt(sess));
       this.writes += 1;
-      if (this.writes % 100 === 0) this.clearExpired.run(Date.now());
+      if (this.writes % 100 === 0) await this.clearExpired.run(Date.now());
       callback(null);
-    } catch (err) {
-      callback(err);
-    }
+    }).catch(callback);
   }
 
   destroy(sid, callback = () => {}) {
-    try {
-      this.destroySession.run(sid);
+    this.ready.then(async () => {
+      await this.destroySession.run(sid);
       callback(null);
-    } catch (err) {
-      callback(err);
-    }
+    }).catch(callback);
   }
 
   touch(sid, sess, callback = () => {}) {

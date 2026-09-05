@@ -45,3 +45,19 @@ test("the same spreadsheet tab cannot be configured twice for one user", () => {
   assert.throws(() => insert.run(1, "Duplicate", "spreadsheet_123", 42, "Leads", "[]"), /UNIQUE constraint failed/);
   db.close();
 });
+
+test("manual sync updates are scoped to the owning user's project only", () => {
+  const db = database();
+  db.exec("ALTER TABLE projects ADD COLUMN sync_snapshot_json TEXT NOT NULL DEFAULT '{}'");
+  db.exec("ALTER TABLE projects ADD COLUMN last_sync TEXT");
+  db.prepare("INSERT INTO projects (user_id,name,spreadsheet_id,sheet_id,sheet_title,columns_json,sync_snapshot_json) VALUES (?,?,?,?,?,?,?)")
+    .run(1, "Owned", "sheet_a", 1, "Leads", "[]", "{\"rows\":{\"2\":\"abc\"}}");
+  const denied = db.prepare(`UPDATE projects
+    SET sync_snapshot_json = ?, last_sync = CURRENT_TIMESTAMP
+    WHERE id = ? AND user_id = ?`).run("{\"rows\":{}}", 1, 2);
+  assert.equal(denied.changes, 0);
+  const owned = db.prepare("SELECT sync_snapshot_json FROM projects WHERE id = ? AND user_id = ?")
+    .get(1, 1);
+  assert.equal(owned.sync_snapshot_json, "{\"rows\":{\"2\":\"abc\"}}");
+  db.close();
+});

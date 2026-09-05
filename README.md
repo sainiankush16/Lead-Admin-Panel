@@ -42,6 +42,19 @@ npm install
 
 Fill in `.env` with the Google OAuth web-client values, a strong session secret, a 64-character hexadecimal token-encryption key, and the one permitted `ADMIN_EMAIL`. `.env` is ignored by Git and must never be committed.
 
+### Local database
+
+Local development uses SQLite via `better-sqlite3` in `./data/lead-admin.db`.
+
+### Vercel / production database
+
+On Vercel the filesystem is read-only, so set these environment variables to a Turso (libSQL) database:
+
+- `TURSO_DATABASE_URL` — e.g. `libsql://your-db.turso.io`
+- `TURSO_AUTH_TOKEN` — Turso auth token
+
+Also set `BASE_URL` to your HTTPS Vercel URL, `GOOGLE_REDIRECT_URI` to `https://your-domain/api/auth/google/callback`, `NODE_ENV=production`, and keep the same secrets used locally. Trust proxy is enabled automatically on Vercel.
+
 ## 4. Run
 
 ```bash
@@ -69,6 +82,7 @@ The backend implements the API endpoints expected by the frontend:
 - GET `/api/projects/:id/leads`
 - PATCH `/api/projects/:id/leads/:rowNumber/status`
 - POST `/api/projects/:id/lead-status-column`
+- POST `/api/projects/:id/sync`
 - POST `/api/sync`
 
 ## 6. Security

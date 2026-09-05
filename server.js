@@ -11,6 +11,7 @@ const { getKey, encrypt, decrypt } = require("./crypto");
 const { resolveAdminUser, csrfTokensMatch, safeEqual } = require("./api-guards");
 const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-data");
 const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
+const { buildSyncSnapshot, compareSheetToSnapshot, syncInProgressGuard } = require("./sync-snapshot");
 const {
   getAuthUrl, exchangeCode, clientFromRefreshToken, getGoogleProfile,
   listSpreadsheets, getTabs, readSheet, writeLeadStatus, createLeadStatusColumn
@@ -21,6 +22,7 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const isProduction = process.env.NODE_ENV === "production";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const projectSyncGuard = syncInProgressGuard();
 
 function requireEnvironment(name) {
   if (!process.env[name]) throw new Error(`${name} is required.`);
@@ -45,10 +47,19 @@ if (isProduction && parsedBaseUrl.protocol !== "https:") {
 }
 
 app.disable("x-powered-by");
-app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : false);
+const trustProxy = process.env.TRUST_PROXY === "true" || process.env.VERCEL === "1";
+app.set("trust proxy", trustProxy ? 1 : false);
 app.use(helmet());
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: false, limit: "100kb" }));
+app.use(async (req, res, next) => {
+  try {
+    await db.ready;
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 app.use(session({
   name: "lead_admin_sid",
   store: new SQLiteSessionStore(db),
@@ -81,16 +92,20 @@ function safeReturnTo(value) {
 }
 
 function currentUser(req) {
-  if (!req.session.userId) return null;
-  return db.prepare("SELECT * FROM users WHERE id = ?").get(req.session.userId) || null;
+  if (!req.session.userId) return Promise.resolve(null);
+  return db.prepare("SELECT * FROM users WHERE id = ?").get(req.session.userId).then(user => user || null);
 }
 
-function requireAuth(req, res, next) {
-  const user = currentUser(req);
-  const access = resolveAdminUser(user, ADMIN_EMAIL);
-  if (!access.ok) return res.status(access.status).json({ error: access.error });
-  req.user = user;
-  next();
+async function requireAuth(req, res, next) {
+  try {
+    const user = await currentUser(req);
+    const access = resolveAdminUser(user, ADMIN_EMAIL);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
 
 function csrfProtection(req, res, next) {
@@ -150,16 +165,79 @@ function projectWithLeads(row, data) {
   };
 }
 
-function loadUserProject(projectId, userId) {
-  return db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, userId) || null;
+async function loadUserProject(projectId, userId) {
+  return await db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, userId) || null;
 }
 
-async function refreshProjectLeads(user, project) {
+async function refreshProjectLeads(user, project, { touchLastSync = false } = {}) {
   const data = await readSheet(googleClientForUser(user), project.spreadsheet_id, project.sheet_title);
-  db.prepare("UPDATE projects SET columns_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
-    .run(JSON.stringify(data.columns), project.id, user.id);
-  const fresh = loadUserProject(project.id, user.id);
+  if (touchLastSync) {
+    await db.prepare("UPDATE projects SET columns_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
+      .run(JSON.stringify(data.columns), project.id, user.id);
+  } else {
+    await db.prepare("UPDATE projects SET columns_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
+      .run(JSON.stringify(data.columns), project.id, user.id);
+  }
+  const fresh = await loadUserProject(project.id, user.id);
   return projectWithLeads(fresh, data);
+}
+
+async function assertProjectTabExists(client, project) {
+  if (!project.spreadsheet_id || !project.sheet_title) {
+    const error = new Error("Project spreadsheet configuration is invalid.");
+    error.code = "INVALID_PROJECT_CONFIG";
+    throw error;
+  }
+  const tabs = await getTabs(client, project.spreadsheet_id);
+  const tab = tabs.find(item =>
+    String(item.sheetId) === String(project.sheet_id) && item.title === project.sheet_title
+  );
+  if (!tab) {
+    const error = new Error("Configured sheet tab was not found.");
+    error.code = "SHEET_TAB_MISSING";
+    throw error;
+  }
+  return tab;
+}
+
+async function syncUserProject(user, project) {
+  const client = googleClientForUser(user);
+  await assertProjectTabExists(client, project);
+  const data = await readSheet(client, project.spreadsheet_id, project.sheet_title);
+  const comparison = compareSheetToSnapshot(
+    project.sync_snapshot_json,
+    data.columns,
+    data.leads,
+    data.rowNumbers
+  );
+  await db.prepare(`UPDATE projects
+    SET columns_json = ?, sync_snapshot_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND user_id = ?`)
+    .run(JSON.stringify(data.columns), JSON.stringify(comparison.snapshot), project.id, user.id);
+  const fresh = await loadUserProject(project.id, user.id);
+  return {
+    project: projectWithLeads(fresh, data),
+    sync: {
+      newLeads: comparison.newLeads,
+      changedLeads: comparison.changedLeads,
+      totalLeads: comparison.totalLeads,
+      newRowNumbers: comparison.newRowNumbers,
+      changedRowNumbers: comparison.changedRowNumbers,
+      message: comparison.message,
+      lastSync: fresh.last_sync
+    }
+  };
+}
+
+function sendSyncError(res, context, err) {
+  logError(context, err);
+  if (err?.code === "INVALID_PROJECT_CONFIG") {
+    return res.status(400).json({ error: "Project spreadsheet configuration is invalid." });
+  }
+  if (err?.code === "SHEET_TAB_MISSING") {
+    return res.status(400).json({ error: "Configured sheet tab was not found. Reconnect the spreadsheet tab." });
+  }
+  return sendGoogleError(res, context, err);
 }
 
 function isSpreadsheetId(value) {
@@ -227,20 +305,20 @@ app.get("/api/auth/google/callback", async (req, res) => {
       return res.status(403).send("This Google account is not authorized.");
     }
 
-    const existing = db.prepare("SELECT * FROM users WHERE google_sub = ?").get(profile.id);
+    const existing = await db.prepare("SELECT * FROM users WHERE google_sub = ?").get(profile.id);
     let userId;
     if (existing) {
       userId = existing.id;
       if (tokens.refresh_token) {
-        db.prepare("UPDATE users SET email = ?, name = ?, picture = ?, refresh_token_enc = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        await db.prepare("UPDATE users SET email = ?, name = ?, picture = ?, refresh_token_enc = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
           .run(profile.email, profile.name || "", profile.picture || "", encrypt(tokens.refresh_token), userId);
       } else {
-        db.prepare("UPDATE users SET email = ?, name = ?, picture = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        await db.prepare("UPDATE users SET email = ?, name = ?, picture = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
           .run(profile.email, profile.name || "", profile.picture || "", userId);
       }
     } else {
       if (!tokens.refresh_token) return res.status(400).send("Google did not provide long-term access. Reconnect the application and try again.");
-      const result = db.prepare("INSERT INTO users (google_sub, email, name, picture, refresh_token_enc) VALUES (?, ?, ?, ?, ?)")
+      const result = await db.prepare("INSERT INTO users (google_sub, email, name, picture, refresh_token_enc) VALUES (?, ?, ?, ?, ?)")
         .run(profile.id, profile.email, profile.name || "", profile.picture || "", encrypt(tokens.refresh_token));
       userId = result.lastInsertRowid;
     }
@@ -255,10 +333,14 @@ app.get("/api/auth/google/callback", async (req, res) => {
   }
 });
 
-app.get("/api/auth/me", (req, res) => {
-  const user = currentUser(req);
-  if (!user || user.email.toLowerCase() !== ADMIN_EMAIL) return res.json({ authenticated: false });
-  res.json({ authenticated: true, user: { id: user.id, name: user.name, email: user.email, picture: user.picture } });
+app.get("/api/auth/me", async (req, res, next) => {
+  try {
+    const user = await currentUser(req);
+    if (!user || user.email.toLowerCase() !== ADMIN_EMAIL) return res.json({ authenticated: false });
+    res.json({ authenticated: true, user: { id: user.id, name: user.name, email: user.email, picture: user.picture } });
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.get("/api/csrf", requireAuth, (req, res) => {
@@ -294,9 +376,13 @@ app.get("/api/sheets/:spreadsheetId/tabs", requireAuth, async (req, res) => {
 
 /* -------------------- PROJECTS -------------------- */
 
-app.get("/api/projects", requireAuth, (req, res) => {
-  const rows = db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY name COLLATE NOCASE").all(req.user.id);
-  res.json({ projects: rows.map(sanitizeProject) });
+app.get("/api/projects", requireAuth, async (req, res, next) => {
+  try {
+    const rows = await db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY name COLLATE NOCASE").all(req.user.id);
+    res.json({ projects: rows.map(sanitizeProject) });
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.post("/api/projects", requireAuth, csrfProtection, async (req, res) => {
@@ -308,15 +394,25 @@ app.post("/api/projects", requireAuth, csrfProtection, async (req, res) => {
     const tabs = await getTabs(client, spreadsheetId);
     const tab = tabs.find(item => String(item.sheetId) === String(sheetId) && item.title === sheetTitle);
     if (!tab) return res.status(400).json({ error: "Selected sheet was not found." });
-    const existing = db.prepare("SELECT id FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
+    const existing = await db.prepare("SELECT id FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
       .get(req.user.id, spreadsheetId, tab.sheetId);
     if (existing) return res.status(409).json({ error: "This spreadsheet tab is already connected as a project." });
     const spreadsheet = (await listSpreadsheets(client)).find(item => item.id === spreadsheetId);
     const data = await readSheet(client, spreadsheetId, tab.title);
-    db.prepare(`INSERT INTO projects (user_id, name, spreadsheet_id, spreadsheet_name, sheet_id, sheet_title, columns_json, last_sync)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
-      .run(req.user.id, name, spreadsheetId, spreadsheet ? spreadsheet.name : "", tab.sheetId, tab.title, JSON.stringify(data.columns));
-    const project = db.prepare("SELECT * FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
+    const snapshot = buildSyncSnapshot(data.columns, data.leads, data.rowNumbers);
+    await db.prepare(`INSERT INTO projects (user_id, name, spreadsheet_id, spreadsheet_name, sheet_id, sheet_title, columns_json, sync_snapshot_json, last_sync)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
+      .run(
+        req.user.id,
+        name,
+        spreadsheetId,
+        spreadsheet ? spreadsheet.name : "",
+        tab.sheetId,
+        tab.title,
+        JSON.stringify(data.columns),
+        JSON.stringify(snapshot)
+      );
+    const project = await db.prepare("SELECT * FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
       .get(req.user.id, spreadsheetId, tab.sheetId);
     // Lead values remain in Google Sheets. The creation response only returns configuration.
     res.status(201).json({ project: sanitizeProject(project) });
@@ -325,18 +421,22 @@ app.post("/api/projects", requireAuth, csrfProtection, async (req, res) => {
   }
 });
 
-app.delete("/api/projects/:id", requireAuth, csrfProtection, (req, res) => {
-  const id = positiveId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const result = db.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").run(id, req.user.id);
-  if (!result.changes) return res.status(404).json({ error: "Project not found." });
-  res.json({ ok: true });
+app.delete("/api/projects/:id", requireAuth, csrfProtection, async (req, res, next) => {
+  try {
+    const id = positiveId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid project id." });
+    const result = await db.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").run(id, req.user.id);
+    if (!result.changes) return res.status(404).json({ error: "Project not found." });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
 app.get("/api/projects/:id/leads", requireAuth, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = loadUserProject(id, req.user.id);
+  const project = await loadUserProject(id, req.user.id);
   if (!project) return res.status(404).json({ error: "Project not found." });
   try {
     res.json(await refreshProjectLeads(req.user, project));
@@ -348,7 +448,7 @@ app.get("/api/projects/:id/leads", requireAuth, async (req, res) => {
 app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtection, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = loadUserProject(id, req.user.id);
+  const project = await loadUserProject(id, req.user.id);
   if (!project) return res.status(404).json({ error: "Project not found." });
 
   try {
@@ -378,7 +478,7 @@ app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtecti
 app.post("/api/projects/:id/lead-status-column", requireAuth, csrfProtection, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = loadUserProject(id, req.user.id);
+  const project = await loadUserProject(id, req.user.id);
   if (!project) return res.status(404).json({ error: "Project not found." });
 
   try {
@@ -400,20 +500,50 @@ app.post("/api/projects/:id/lead-status-column", requireAuth, csrfProtection, as
 
 /* -------------------- SYNC -------------------- */
 
+app.post("/api/projects/:id/sync", requireAuth, csrfProtection, async (req, res) => {
+  const id = positiveId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid project id." });
+  const project = await loadUserProject(id, req.user.id);
+  if (!project) return res.status(404).json({ error: "Project not found." });
+  if (!projectSyncGuard.tryBegin(id)) {
+    return res.status(409).json({ error: "Sync already in progress for this project." });
+  }
+  try {
+    const result = await syncUserProject(req.user, project);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    sendSyncError(res, "Unable to sync project", err);
+  } finally {
+    projectSyncGuard.end(id);
+  }
+});
+
 app.post("/api/sync", requireAuth, csrfProtection, async (req, res) => {
   try {
-    const client = googleClientForUser(req.user);
-    const projects = db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY name COLLATE NOCASE").all(req.user.id);
+    const projects = await db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY name COLLATE NOCASE").all(req.user.id);
     const updated = [];
     for (const project of projects) {
+      if (!projectSyncGuard.tryBegin(project.id)) {
+        updated.push({ id: project.id, name: project.name, error: "Sync already in progress for this project." });
+        continue;
+      }
       try {
-        const data = await readSheet(client, project.spreadsheet_id, project.sheet_title);
-        db.prepare("UPDATE projects SET columns_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
-          .run(JSON.stringify(data.columns), project.id, req.user.id);
-        updated.push({ id: project.id, name: project.name, leads: data.leads.length, columns: data.columns, lastSync: new Date().toISOString() });
+        const result = await syncUserProject(req.user, project);
+        updated.push({
+          id: project.id,
+          name: project.name,
+          leads: result.sync.totalLeads,
+          columns: result.project.columns,
+          lastSync: result.sync.lastSync,
+          newLeads: result.sync.newLeads,
+          changedLeads: result.sync.changedLeads,
+          message: result.sync.message
+        });
       } catch (err) {
         logError(`Unable to sync project ${project.id}`, err);
         updated.push({ id: project.id, name: project.name, error: "Unable to sync this project." });
+      } finally {
+        projectSyncGuard.end(project.id);
       }
     }
     res.json({ ok: true, projects: updated });
@@ -437,4 +567,16 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
   res.status(500).json({ error: "An unexpected server error occurred." });
 });
 
-app.listen(PORT, () => console.log(`Lead Admin running at ${BASE_URL}`));
+async function start() {
+  await db.ready;
+  if (require.main === module) {
+    app.listen(PORT, () => console.log(`Lead Admin running at ${BASE_URL}`));
+  }
+}
+
+start().catch(err => {
+  console.error("Failed to start Lead Admin", { name: err?.name || "Error", code: err?.code || "unknown" });
+  if (require.main === module) process.exit(1);
+});
+
+module.exports = app;

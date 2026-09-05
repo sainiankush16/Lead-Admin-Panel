@@ -1,468 +1,961 @@
 (() => {
   "use strict";
-  const $ = s => document.querySelector(s), app = $("#app"), login = $("#login"), logout = $("#logout"), status = $("#status");
-  let csrfToken, projects = [], active;
+
   const STATUS_OPTIONS = ["New", "Contacted", "Interested", "Follow Up", "Site Visit", "Converted", "Not Interested", "Lost"];
-  const el = (tag, props = {}, children = []) => {
-    const n = document.createElement(tag);
-    Object.entries(props).forEach(([k, v]) => {
-      if (k === "ariaLabel") n.setAttribute("aria-label", v);
-      else if (k === "ariaModal") n.setAttribute("aria-modal", v);
-      else if (k === "ariaLabelledby") n.setAttribute("aria-labelledby", v);
-      else if (k === "dataset") Object.entries(v).forEach(([dk, dv]) => { n.dataset[dk] = dv; });
-      else n[k] = v;
-    });
-    children.forEach(c => n.append(c));
-    return n;
+  const STATUS_COLORS = ["green", "blue", "yellow", "purple", "cyan", "red"];
+  const VIEW_TITLES = {
+    dashboard: ["Dashboard", "All projects overview"],
+    projects: ["Projects", "Manage connected projects"],
+    connections: ["Google Sheets", "Manage Google Sheet connections"],
+    allLeads: ["All Leads", "Leads from all projects"]
   };
-  const note = (text, className = "") => el("p", { textContent: text, className });
-  const statusColumn = columns => columns.find(c => String(c).trim().toLowerCase() === "lead status") || null;
-  const statusValue = (lead, column) => String(lead?.[column] ?? "").trim() || "New";
-  const when = value => value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "Not refreshed yet";
+
+  let csrfToken = null;
+  let user = null;
+  let projects = [];
+  const leadsCache = Object.create(null);
+  let currentProjectId = null;
+  let syncing = false;
+  let spreadsheets = [];
+  let selectedSpreadsheet = null;
+  let selectedTab = null;
+  let toastTimer = null;
+
+  const $ = id => document.getElementById(id);
+
+  function escapeHTML(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function escapeAttr(value) {
+    return escapeHTML(value);
+  }
+
+  function when(value) {
+    return value
+      ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))
+      : "Not refreshed yet";
+  }
+
+  function greetingName() {
+    const name = user?.name?.trim() || user?.email?.split("@")[0] || "Admin";
+    const hour = new Date().getHours();
+    const period = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    return `${period}, ${name}`;
+  }
+
+  function normalizeStatus(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function statusColumn(columns) {
+    return (columns || []).find(c => normalizeStatus(c) === "lead status") || null;
+  }
+
+  function statusValue(lead, column) {
+    if (!column) return "New";
+    return String(lead?.[column] ?? "").trim() || "New";
+  }
+
+  function findColumn(columns, name) {
+    const target = normalizeStatus(name);
+    return (columns || []).find(c => normalizeStatus(c) === target) || null;
+  }
+
+  function getStatusClass(status) {
+    const s = normalizeStatus(status);
+    if (s === "new") return "status-new";
+    if (s === "contacted" || s === "follow up") return "status-contacted";
+    if (s === "interested") return "status-interested";
+    if (s.includes("site") || s.includes("visit")) return "status-site";
+    if (s === "converted") return "status-converted";
+    if (s === "lost" || s.includes("not interested")) return "status-lost";
+    return "status-contacted";
+  }
+
+  function projectInitials(name) {
+    return String(name || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(word => word[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "P";
+  }
+
+  function activeProject() {
+    return currentProjectId ? leadsCache[currentProjectId] || null : null;
+  }
+
+  function setCache(projectData) {
+    if (projectData?.id) leadsCache[projectData.id] = projectData;
+  }
 
   async function api(path, options = {}) {
     const headers = new Headers(options.headers || {});
-    if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(options.method)) headers.set("X-CSRF-Token", csrfToken);
+    if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(options.method)) {
+      headers.set("X-CSRF-Token", csrfToken);
+    }
     const res = await fetch(path, { ...options, headers, credentials: "same-origin" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Request failed.");
     return data;
   }
 
-  async function getProjects() { ({ projects } = await api("/api/projects")); }
-  function back() {
-    const b = el("button", { className: "quiet", type: "button", textContent: "← Back to Projects" });
-    b.onclick = projectsView;
-    return b;
+  function showLoading(text) {
+    $("loadingText").textContent = text || "Loading...";
+    $("loading").classList.add("active");
   }
 
-  function projectsView(error) {
-    active = null;
-    app.replaceChildren();
-    const add = el("button", { className: "primary", type: "button", textContent: "Add Project" });
-    add.onclick = projectDialog;
-    app.append(el("div", { className: "toolbar" }, [
-      el("div", {}, [el("div", {}, [el("h2", { textContent: "Projects" }), note("Connect a spreadsheet tab to view its live leads.", "subtle")])]),
-      add
-    ]));
-    if (error) app.append(note(error, "error"));
+  function hideLoading() {
+    $("loading").classList.remove("active");
+  }
+
+  function showToast(message) {
+    const toast = $("toast");
+    toast.textContent = message;
+    toast.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("show"), 3200);
+  }
+
+  function toggleSidebar() {
+    $("sidebar").classList.toggle("open");
+  }
+
+  function closeSidebar() {
+    $("sidebar").classList.remove("open");
+  }
+
+  function setUserUI() {
+    const initials = projectInitials(user?.name || user?.email || "A");
+    $("userAvatar").textContent = initials;
+    $("userName").textContent = user?.name?.trim() || "Admin";
+    $("userEmail").textContent = user?.email || "";
+    $("oauthSignedInText").textContent = user?.email
+      ? `Signed in as ${user.email}. Select a spreadsheet and tab below to connect a project.`
+      : "Your Google account is authorized for this app. Select a spreadsheet and tab below.";
+    $("dashboardGreeting").textContent = greetingName();
+  }
+
+  function latestSyncText() {
+    const times = projects.map(p => p.lastSync).filter(Boolean);
+    if (!times.length) return "Not synced yet";
+    const latest = times.sort((a, b) => new Date(b) - new Date(a))[0];
+    return `Last sync ${when(latest)}`;
+  }
+
+  function updateSyncText() {
+    $("syncText").textContent = latestSyncText();
+  }
+
+  function collectAllLeads() {
+    const items = [];
+    projects.forEach(project => {
+      const cached = leadsCache[project.id];
+      if (!cached?.leads) return;
+      const col = statusColumn(cached.columns);
+      cached.leads.forEach((lead, index) => {
+        items.push({
+          projectId: project.id,
+          projectName: project.name,
+          lead,
+          rowNumber: cached.rowNumbers?.[index] ?? null,
+          statusColumn: col,
+          columns: cached.columns || []
+        });
+      });
+    });
+    return items;
+  }
+
+  function statusCountsFromItems(items) {
+    const counts = Object.create(null);
+    items.forEach(item => {
+      const status = statusValue(item.lead, item.statusColumn);
+      counts[status] = (counts[status] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function statusCountsForProject(projectId) {
+    const cached = leadsCache[projectId];
+    if (!cached?.leads) return Object.create(null);
+    const col = statusColumn(cached.columns);
+    const counts = Object.create(null);
+    cached.leads.forEach(lead => {
+      const status = statusValue(lead, col);
+      counts[status] = (counts[status] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function countStatus(counts, status) {
+    const key = Object.keys(counts).find(k => normalizeStatus(k) === normalizeStatus(status));
+    return key ? counts[key] : 0;
+  }
+
+  function renderStatusBars(container, counts, total) {
+    if (!total) {
+      container.innerHTML = '<div class="empty-state"><p>No leads loaded yet.</p></div>';
+      return;
+    }
+    const rows = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([status, count], index) => {
+        const pct = Math.round((count / total) * 100);
+        const color = STATUS_COLORS[index % STATUS_COLORS.length];
+        return `<div class="status-row">
+          <div class="status-info">
+            <div class="status-name"><span class="status-dot ${color}"></span>${escapeHTML(status)}</div>
+            <strong>${count}${total ? ` (${pct}%)` : ""}</strong>
+          </div>
+          <div class="status-bar"><div class="status-fill ${color}" style="width:${pct}%"></div></div>
+        </div>`;
+      })
+      .join("");
+    container.innerHTML = rows || '<div class="empty-state"><p>No status data.</p></div>';
+  }
+
+  function renderProjectCard(project) {
+    const cached = leadsCache[project.id];
+    const leads = cached?.leads || [];
+    const counts = statusCountsForProject(project.id);
+    const total = leads.length;
+    const converted = countStatus(counts, "Converted");
+    const newCount = countStatus(counts, "New");
+    const initials = projectInitials(project.name);
+
+    return `<div class="project-card" data-project-id="${project.id}" onclick="openProject(${project.id})">
+      <div class="project-head">
+        <div class="project-logo">${escapeHTML(initials)}</div>
+      </div>
+      <h3>${escapeHTML(project.name)}</h3>
+      <p>${escapeHTML(project.spreadsheetName || project.spreadsheetId)} · ${escapeHTML(project.sheetName)}</p>
+      <div class="project-stats">
+        <div class="mini-stat"><span>Total Leads</span><strong>${total}</strong></div>
+        <div class="mini-stat"><span>New Leads</span><strong>${newCount}</strong></div>
+        <div class="mini-stat"><span>Converted</span><strong>${converted}</strong></div>
+        <div class="mini-stat"><span>Last Sync</span><strong style="font-size:12px;">${escapeHTML(when(project.lastSync))}</strong></div>
+      </div>
+      <div class="project-footer"><span>View Dashboard</span><span>→</span></div>
+    </div>`;
+  }
+
+  function renderProjectsGrid(containerId) {
+    const container = $(containerId);
+    if (!container) return;
     if (!projects.length) {
-      return app.append(el("section", { className: "panel empty" }, [
-        note("No projects yet."),
-        note("Add a project to connect a Google Spreadsheet tab.")
-      ]));
+      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">▣</div><p>No projects connected yet.</p></div>`;
+      return;
     }
-    const grid = el("section", { className: "project-grid", ariaLabel: "Configured projects" });
-    projects.forEach(p => {
-      const card = el("button", { className: "project-card", type: "button" }, [
-        el("h3", { textContent: p.name }),
-        note(p.spreadsheetName || p.spreadsheetId),
-        note(`Tab: ${p.sheetName}`)
-      ]);
-      card.onclick = () => openProject(p);
-      grid.append(card);
-    });
-    app.append(grid);
+    container.innerHTML = projects.map(renderProjectCard).join("");
   }
 
-  async function openProject(project) {
-    app.replaceChildren(el("section", { className: "panel empty" }, [note("Loading the latest Google Sheet data…")]));
-    try {
-      active = await api(`/api/projects/${project.id}/leads`);
-      projectView();
-    } catch (e) {
-      projectError(e.message);
-    }
-  }
+  function loadDashboard() {
+    $("dashboardGreeting").textContent = greetingName();
+    const allItems = collectAllLeads();
+    const counts = statusCountsFromItems(allItems);
+    const totalLeads = allItems.length;
 
-  function projectError(message) {
-    app.replaceChildren(el("section", { className: "panel" }, [back(), note(message, "error")]));
-  }
+    $("totalProjects").textContent = String(projects.length);
+    $("totalLeads").textContent = String(totalLeads);
+    $("newLeads").textContent = String(countStatus(counts, "New"));
+    $("convertedLeads").textContent = String(countStatus(counts, "Converted"));
 
-  function summary(columns, leads) {
-    const column = statusColumn(columns);
-    const counts = new Map();
-    if (column) {
-      leads.forEach(lead => {
-        const name = statusValue(lead, column);
-        counts.set(name, (counts.get(name) || 0) + 1);
-      });
-    }
-    return {
-      column,
-      statuses: [...counts.entries()]
-        .map(([name, count]) => ({ name, count, percentage: leads.length ? count / leads.length * 100 : 0 }))
-        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-    };
-  }
+    renderStatusBars($("overallStatusContainer"), counts, totalLeads);
 
-  function card(name, count, percentage, primary) {
-    return el("article", { className: `metric${primary ? " metric-primary" : ""}` }, [
-      el("span", { textContent: name }),
-      el("strong", { textContent: String(count) }),
-      note(percentage === null ? "All valid lead rows" : `${percentage.toFixed(1)}% of total`, "subtle")
-    ]);
-  }
-
-  function distribution(items) {
-    const section = el("section", { className: "distribution", ariaLabel: "Lead Status distribution" }, [
-      el("h3", { textContent: "Lead Status distribution" })
-    ]);
-    items.forEach(i => section.append(el("div", { className: "distribution-row" }, [
-      el("div", { className: "distribution-label", textContent: i.name }),
-      el("div", { className: "distribution-track" }, [el("div", { className: "distribution-bar", style: `width:${i.percentage}%` })]),
-      el("div", { className: "distribution-value", textContent: `${i.count} (${i.percentage.toFixed(1)}%)` })
-    ])));
-    return section;
-  }
-
-  async function addLeadStatusColumn() {
-    const button = app.querySelector("[data-action='add-status-column']");
-    if (button) {
-      button.disabled = true;
-      button.textContent = "Adding column…";
-    }
-    try {
-      const result = await api(`/api/projects/${active.id}/lead-status-column`, { method: "POST" });
-      active = result.project;
-      projectView();
-    } catch (e) {
-      projectError(e.message);
-    }
-  }
-
-  function projectView() {
-    app.replaceChildren();
-    const { columns, leads, name, spreadsheetName, sheetName, lastSync } = active;
-    const data = summary(columns, leads);
-    const refresh = el("button", { className: "secondary", type: "button", textContent: "Refresh" });
-    refresh.onclick = async () => {
-      refresh.disabled = true;
-      refresh.textContent = "Refreshing…";
-      try {
-        active = await api(`/api/projects/${active.id}/leads`);
-        projectView();
-      } catch (e) {
-        projectError(e.message);
-      }
-    };
-    const header = el("section", { className: "project-header panel" }, [
-      el("div", {}, [
-        el("h2", { textContent: name }),
-        note(`Spreadsheet: ${spreadsheetName || "Google Spreadsheet"}`),
-        note(`Sheet/Tab: ${sheetName}`),
-        note(`Last refreshed: ${when(lastSync)}`, "subtle")
-      ]),
-      el("div", { className: "header-actions" }, [back(), refresh])
-    ]);
-    const cards = el("section", { className: "metrics", ariaLabel: "Lead status summary" }, [
-      card("Total Leads", leads.length, null, true)
-    ]);
-    data.statuses.forEach(i => cards.append(card(i.name, i.count, i.percentage)));
-
-    let statusSection;
-    if (data.column) {
-      statusSection = distribution(data.statuses);
+    const perf = $("performanceContainer");
+    if (!projects.length) {
+      perf.innerHTML = '<div class="empty-state"><p>No projects yet.</p></div>';
     } else {
-      const addColumn = el("button", {
-        className: "primary",
-        type: "button",
-        textContent: "Add Lead Status column",
-        dataset: { action: "add-status-column" }
-      });
-      addColumn.onclick = addLeadStatusColumn;
-      statusSection = el("section", { className: "status-warning" }, [
-        el("h3", { textContent: "Lead Status distribution" }),
-        note("Lead Status column not found", "error"),
-        note("Add a Lead Status column at the end of this sheet to track and edit statuses. Existing lead rows will default to New.", "subtle"),
-        addColumn
-      ]);
+      perf.innerHTML = projects.map(project => {
+        const cached = leadsCache[project.id];
+        const total = cached?.leads?.length || 0;
+        const converted = countStatus(statusCountsForProject(project.id), "Converted");
+        const rate = total ? Math.round((converted / total) * 100) : 0;
+        return `<div style="margin-bottom:18px;">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:7px;">
+            <strong>${escapeHTML(project.name)}</strong><span>${rate}% Converted</span>
+          </div>
+          <div class="status-bar"><div class="status-fill green" style="width:${rate}%"></div></div>
+        </div>`;
+      }).join("");
     }
 
-    app.append(
-      header,
-      el("section", { className: "dashboard-summary" }, [el("h2", { textContent: "Lead Summary" }), cards]),
-      statusSection,
-      leadControls()
-    );
+    renderProjectsGrid("dashboardProjects");
+    updateSyncText();
   }
 
-  function leadControls() {
-    const section = el("section", { className: "panel lead-data" }, [el("h2", { textContent: "Leads" })]);
-    const search = el("input", { type: "search", placeholder: "Search all lead data", ariaLabel: "Search all lead data" });
-    const filter = el("select", { ariaLabel: "Filter by Lead Status" }, [
-      el("option", { value: "", textContent: "All Lead Statuses" })
-    ]);
-    const clear = el("button", { className: "quiet", type: "button", textContent: "Clear Filters" });
-    const feedback = el("p", { className: "notice", role: "status" });
-    const target = el("div");
-
-    const syncFilterOptions = selected => {
-      const data = summary(active.columns, active.leads);
-      filter.disabled = !data.column;
-      filter.replaceChildren(el("option", { value: "", textContent: "All Lead Statuses" }));
-      data.statuses.forEach(i => filter.append(el("option", { value: i.name, textContent: i.name })));
-      if (selected && [...filter.options].some(option => option.value === selected)) filter.value = selected;
-      else filter.value = "";
-      return data;
-    };
-
-    const update = () => {
-      const data = syncFilterOptions(filter.value);
-      renderTable(
-        target,
-        active.columns,
-        active.leads,
-        data.column,
-        search.value,
-        filter.value,
-        active.rowNumbers || [],
-        feedback,
-        () => {
-          rebuildSummary(summary(active.columns, active.leads));
-          update();
-        }
-      );
-    };
-
-    search.oninput = update;
-    filter.onchange = update;
-    clear.onclick = () => {
-      search.value = "";
-      filter.value = "";
-      feedback.textContent = "";
-      update();
-    };
-    section.append(el("div", { className: "toolbar lead-controls" }, [el("div", {}, [search, filter, clear])]), feedback, target);
-    update();
-    return section;
+  function renderProjectDetailStats() {
+    const cached = activeProject();
+    if (!cached) return;
+    const counts = statusCountsForProject(cached.id);
+    $("detailTotal").textContent = String(cached.leads?.length || 0);
+    $("detailNew").textContent = String(countStatus(counts, "New"));
+    $("detailContacted").textContent = String(countStatus(counts, "Contacted"));
+    $("detailInterested").textContent = String(countStatus(counts, "Interested"));
+    $("detailSite").textContent = String(countStatus(counts, "Site Visit"));
+    $("detailConverted").textContent = String(countStatus(counts, "Converted"));
   }
 
-  function rebuildSummary(data) {
-    const summaryRoot = app.querySelector(".dashboard-summary");
-    const distributionRoot = app.querySelector(".distribution, .status-warning");
-    if (!summaryRoot) return;
-    const cards = el("section", { className: "metrics", ariaLabel: "Lead status summary" }, [
-      card("Total Leads", active.leads.length, null, true)
-    ]);
-    data.statuses.forEach(i => cards.append(card(i.name, i.count, i.percentage)));
-    summaryRoot.replaceChildren(el("h2", { textContent: "Lead Summary" }), cards);
-    if (distributionRoot && data.column) {
-      distributionRoot.replaceWith(distribution(data.statuses));
-    }
-  }
+  function populateProjectFilters() {
+    const cached = activeProject();
+    if (!cached) return;
+    const col = statusColumn(cached.columns);
+    const sourceCol = findColumn(cached.columns, "Source");
 
-  function renderTable(target, columns, leads, column, search, selected, rowNumbers, feedback, onStatusChanged) {
-    target.replaceChildren();
-    if (!columns.length) return target.append(el("div", { className: "empty", textContent: "This sheet has no header row." }));
-    if (!leads.length) return target.append(el("div", { className: "empty", textContent: "No leads found in this sheet." }));
+    const statusFilter = $("statusFilter");
+    statusFilter.innerHTML = '<option value="">All Status</option>';
+    STATUS_OPTIONS.forEach(status => {
+      statusFilter.innerHTML += `<option value="${escapeAttr(status)}">${escapeHTML(status)}</option>`;
+    });
+    statusFilter.disabled = !col;
 
-    const needle = search.trim().toLowerCase();
-    const indexed = leads.map((lead, index) => ({ lead, rowNumber: rowNumbers[index], index }))
-      .filter(({ lead }) => (!selected || statusValue(lead, column) === selected)
-        && (!needle || columns.some(key => {
-          const value = column && key === column ? statusValue(lead, column) : String(lead[key] ?? "");
-          return value.toLowerCase().includes(needle);
-        })));
-
-    if (!indexed.length) return target.append(el("div", { className: "empty", textContent: "No leads match the current filters." }));
-
-    const tr = el("tr");
-    const body = el("tbody");
-    columns.forEach(key => tr.append(el("th", { scope: "col", textContent: key })));
-
-    indexed.forEach(({ lead, rowNumber }) => {
-      const row = el("tr");
-      columns.forEach(key => {
-        if (column && key === column) {
-          row.append(el("td", {}, [statusSelect(lead, column, rowNumber, row, feedback, onStatusChanged)]));
-        } else {
-          row.append(el("td", { textContent: String(lead[key] ?? "") }));
-        }
+    const sourceFilter = $("sourceFilter");
+    if (sourceCol) {
+      sourceFilter.classList.remove("hidden");
+      const sources = [...new Set(cached.leads.map(l => String(l[sourceCol] ?? "").trim()).filter(Boolean))].sort();
+      sourceFilter.innerHTML = '<option value="">All Sources</option>';
+      sources.forEach(source => {
+        sourceFilter.innerHTML += `<option value="${escapeAttr(source)}">${escapeHTML(source)}</option>`;
       });
-      body.append(row);
-    });
+    } else {
+      sourceFilter.classList.add("hidden");
+      sourceFilter.innerHTML = '<option value="">All Sources</option>';
+    }
 
-    target.append(
-      note(`Showing ${indexed.length} of ${leads.length} leads`, "subtle"),
-      el("div", { className: "table-wrap" }, [el("table", {}, [el("thead", {}, [tr]), body])])
-    );
+    const hasCol = Boolean(col);
+    $("addStatusColumnBtn").classList.toggle("hidden", hasCol);
+    $("statusColumnWarning").classList.toggle("hidden", hasCol);
   }
 
-  function statusSelect(lead, column, rowNumber, row, feedback, onStatusChanged) {
-    const previous = statusValue(lead, column);
-    const select = el("select", {
-      ariaLabel: "Lead Status",
-      value: previous,
-      disabled: !rowNumber
+  function buildStatusSelect(lead, column, rowNumber, row) {
+    let saved = statusValue(lead, column);
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Lead Status");
+    const values = new Set(STATUS_OPTIONS);
+    values.add(saved);
+    [...values].forEach(value => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value;
+      select.appendChild(option);
     });
-    const optionValues = new Set(STATUS_OPTIONS);
-    optionValues.add(previous);
-    [...optionValues].forEach(value => select.append(el("option", { value, textContent: value })));
-    select.value = previous;
+    select.value = saved;
+    if (!rowNumber) select.disabled = true;
 
     select.onchange = async () => {
       const nextStatus = select.value;
-      if (nextStatus === previous) return;
+      if (nextStatus === saved) return;
       select.disabled = true;
       row.classList.add("row-updating");
-      feedback.textContent = "Saving Lead Status…";
-      feedback.className = "notice";
       try {
-        const result = await api(`/api/projects/${active.id}/leads/${rowNumber}/status`, {
+        const result = await api(`/api/projects/${currentProjectId}/leads/${rowNumber}/status`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: nextStatus })
         });
-        active = result.project;
-        feedback.textContent = `Lead Status saved as ${nextStatus}.`;
-        feedback.className = "notice";
+        setCache(result.project);
+        lead[column] = nextStatus;
+        saved = nextStatus;
+        showToast(`Lead Status saved as ${nextStatus}.`);
+        renderProjectDetailStats();
+        renderProjectStatusDistribution();
+        filterLeads();
+      } catch (err) {
+        select.value = saved;
+        showToast(err.message);
+      } finally {
         row.classList.remove("row-updating");
-        select.disabled = false;
-        onStatusChanged();
-      } catch (e) {
-        select.value = previous;
-        feedback.textContent = e.message;
-        feedback.className = "error";
-        row.classList.remove("row-updating");
-        select.disabled = false;
+        select.disabled = !rowNumber;
       }
     };
     return select;
   }
 
-  async function projectDialog() {
-    const shade = el("div", { className: "modal-backdrop" });
-    const dialog = el("section", { className: "modal", role: "dialog", ariaModal: "true", ariaLabelledby: "dialog-title" });
-    shade.append(dialog);
-    document.body.append(shade);
-    const close = () => shade.remove();
-    const error = el("div");
-    const search = el("input", { type: "search", placeholder: "Search spreadsheets", ariaLabel: "Search available spreadsheets" });
-    const list = el("div", { className: "choice-list", ariaLabel: "Available Google Spreadsheets" });
-    const tabs = el("select", { disabled: true });
-    const name = el("input", { type: "text", maxLength: 120, placeholder: "Project name", required: true });
-    const save = el("button", { className: "primary", type: "submit", textContent: "Save Project", disabled: true });
-    const form = el("form", {}, [el("div", { className: "form-actions" }, [
-      el("button", { className: "quiet", type: "button", textContent: "Cancel" }),
-      save
-    ])]);
-    dialog.append(
-      el("div", { className: "modal-head" }, [
-        el("div", {}, [
-          el("h2", { id: "dialog-title", textContent: "Connect Google Sheet" }),
-          note("Select a spreadsheet and one of its tabs.", "subtle")
-        ]),
-        el("button", { className: "quiet", type: "button", textContent: "Close" })
-      ]),
-      el("label", { textContent: "Google Spreadsheet" }),
-      search,
-      list,
-      el("label", { textContent: "Sheet tab" }),
-      tabs,
-      el("label", { textContent: "Project Name" }),
-      name,
-      error,
-      form
-    );
-    dialog.querySelector(".modal-head button").onclick = close;
-    form.querySelector(".quiet").onclick = close;
-    let sheets = [], selectedSheet, selectedTab;
-    const ready = () => { save.disabled = !(selectedSheet && selectedTab && name.value.trim()); };
-    const draw = () => {
-      list.replaceChildren();
-      sheets.filter(s => s.name.toLowerCase().includes(search.value.toLowerCase())).forEach(s => {
-        const b = el("button", {
-          className: "choice",
-          type: "button",
-          ariaPressed: String(selectedSheet?.id === s.id),
-          textContent: s.name || "Untitled spreadsheet"
-        });
-        b.onclick = () => choose(s);
-        list.append(b);
-      });
-      if (!list.children.length) list.append(el("p", { className: "empty", textContent: "No spreadsheets found." }));
-    };
-    async function choose(sheet) {
-      selectedSheet = sheet;
-      selectedTab = null;
-      ready();
-      tabs.replaceChildren(el("option", { textContent: "Loading tabs…" }));
-      tabs.disabled = true;
-      draw();
-      try {
-        const result = await api(`/api/sheets/${encodeURIComponent(sheet.id)}/tabs`);
-        tabs.replaceChildren(el("option", { value: "", textContent: "Select a tab" }));
-        result.tabs.forEach(tab => tabs.append(el("option", { value: String(tab.sheetId), textContent: tab.title })));
-        tabs.disabled = false;
-        name.value = name.value || sheet.name || "";
-      } catch (e) {
-        error.replaceChildren(note(e.message, "error"));
-      }
+  function renderLeadTableRows(leads) {
+    const cached = activeProject();
+    const head = $("leadTableHead");
+    const body = $("leadTableBody");
+    if (!cached) return;
+
+    const columns = cached.columns || [];
+    const statusCol = statusColumn(columns);
+
+    head.innerHTML = `<tr>${columns.map(c => `<th>${escapeHTML(c)}</th>`).join("")}</tr>`;
+    body.replaceChildren();
+
+    if (!columns.length) {
+      body.innerHTML = `<tr><td colspan="1" style="text-align:center;padding:40px;color:#6b7280;">This sheet has no header row.</td></tr>`;
+      return;
     }
-    search.oninput = draw;
-    tabs.onchange = () => {
-      selectedTab = tabs.value ? { sheetId: Number(tabs.value), sheetTitle: tabs.selectedOptions[0].textContent } : null;
-      ready();
-    };
-    name.oninput = ready;
-    form.onsubmit = async event => {
-      event.preventDefault();
-      save.disabled = true;
-      save.textContent = "Saving…";
-      error.replaceChildren();
-      try {
-        await api("/api/projects", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: name.value, spreadsheetId: selectedSheet.id, ...selectedTab })
+    if (!leads.length) {
+      body.innerHTML = `<tr><td colspan="${columns.length}" style="text-align:center;padding:40px;color:#6b7280;">No leads match the current filters.</td></tr>`;
+      return;
+    }
+
+    leads.forEach(({ lead, rowNumber }) => {
+      const row = document.createElement("tr");
+      columns.forEach(column => {
+        const cell = document.createElement("td");
+        if (statusCol && column === statusCol) {
+          cell.appendChild(buildStatusSelect(lead, column, rowNumber, row));
+        } else {
+          const text = String(lead[column] ?? "");
+          cell.textContent = text;
+          if (normalizeStatus(column) === "name") cell.classList.add("lead-name");
+        }
+        row.appendChild(cell);
+      });
+      body.appendChild(row);
+    });
+  }
+
+  function filteredProjectLeads() {
+    const cached = activeProject();
+    if (!cached) return [];
+    const search = $("leadSearch").value.trim().toLowerCase();
+    const status = $("statusFilter").value;
+    const sourceCol = findColumn(cached.columns, "Source");
+    const source = sourceCol ? $("sourceFilter").value : "";
+    const statusCol = statusColumn(cached.columns);
+
+    return cached.leads
+      .map((lead, index) => ({ lead, rowNumber: cached.rowNumbers?.[index] ?? null }))
+      .filter(({ lead }) => {
+        const matchStatus = !status || statusValue(lead, statusCol) === status;
+        const matchSource = !source || String(lead[sourceCol] ?? "") === source;
+        const matchSearch = !search || (cached.columns || []).some(key => {
+          const value = statusCol && key === statusCol ? statusValue(lead, statusCol) : String(lead[key] ?? "");
+          return value.toLowerCase().includes(search);
         });
-        await getProjects();
-        close();
-        projectsView();
-      } catch (e) {
-        error.replaceChildren(note(e.message, "error"));
-        save.textContent = "Save Project";
-        ready();
+        return matchStatus && matchSource && matchSearch;
+      });
+  }
+
+  function renderProjectStatusDistribution() {
+    const cached = activeProject();
+    const container = $("projectStatusContainer");
+    if (!cached) return;
+    const counts = statusCountsForProject(cached.id);
+    renderStatusBars(container, counts, cached.leads?.length || 0);
+  }
+
+  function renderProjectDetail() {
+    const cached = activeProject();
+    if (!cached) return;
+
+    $("detailProjectName").textContent = cached.name;
+    $("detailProjectSheet").textContent = `Spreadsheet: ${cached.spreadsheetName || "Google Spreadsheet"} · Tab: ${cached.sheetName}`;
+
+    renderProjectDetailStats();
+    renderProjectStatusDistribution();
+    populateProjectFilters();
+    renderLeadTableRows(filteredProjectLeads());
+  }
+
+  function buildUnionColumns() {
+    const ordered = ["Project"];
+    const seen = new Set(["project"]);
+    const priority = ["Lead Status", "Name", "Phone", "Email", "Date", "Source"];
+
+    priority.forEach(name => {
+      const lower = normalizeStatus(name);
+      let found = false;
+      projects.forEach(project => {
+        const cols = leadsCache[project.id]?.columns || [];
+        const match = cols.find(c => normalizeStatus(c) === lower);
+        if (match && !seen.has(normalizeStatus(match))) {
+          ordered.push(match);
+          seen.add(normalizeStatus(match));
+          found = true;
+        }
+      });
+      if (!found && name === "Lead Status" && !seen.has("lead status")) {
+        ordered.push("Lead Status");
+        seen.add("lead status");
       }
-    };
+    });
+
+    projects.forEach(project => {
+      (leadsCache[project.id]?.columns || []).forEach(column => {
+        const lower = normalizeStatus(column);
+        if (lower === "lead status" || seen.has(lower)) return;
+        ordered.push(column);
+        seen.add(lower);
+      });
+    });
+
+    return ordered;
+  }
+
+  function drawAllLeads(items) {
+    const columns = buildUnionColumns();
+    const head = $("allLeadTableHead");
+    const body = $("allLeadTableBody");
+
+    head.innerHTML = `<tr>${columns.map(c => `<th>${escapeHTML(c)}</th>`).join("")}</tr>`;
+    body.replaceChildren();
+
+    if (!items.length) {
+      body.innerHTML = `<tr><td colspan="${Math.max(columns.length, 1)}" style="text-align:center;padding:40px;color:#6b7280;">No leads found.</td></tr>`;
+      return;
+    }
+
+    items.forEach(item => {
+      const rowHtml = columns.map(column => {
+        if (normalizeStatus(column) === "project") {
+          return `<td><strong>${escapeHTML(item.projectName)}</strong></td>`;
+        }
+        const statusCol = item.statusColumn;
+        if (statusCol && normalizeStatus(column) === normalizeStatus(statusCol)) {
+          const status = statusValue(item.lead, statusCol);
+          return `<td><span class="status-badge ${getStatusClass(status)}">${escapeHTML(status)}</span></td>`;
+        }
+        const match = item.columns.find(c => normalizeStatus(c) === normalizeStatus(column));
+        const value = match ? String(item.lead[match] ?? "") : "";
+        const cls = normalizeStatus(column) === "name" ? "lead-name" : "";
+        return `<td class="${cls}">${escapeHTML(value)}</td>`;
+      }).join("");
+      body.innerHTML += `<tr>${rowHtml}</tr>`;
+    });
+  }
+
+  function populateAllLeadsFilters() {
+    const projectFilter = $("allProjectFilter");
+    projectFilter.innerHTML = '<option value="">All Projects</option>';
+    projects.forEach(p => {
+      projectFilter.innerHTML += `<option value="${p.id}">${escapeHTML(p.name)}</option>`;
+    });
+
+    const statusFilter = $("allStatusFilter");
+    statusFilter.innerHTML = '<option value="">All Status</option>';
+    STATUS_OPTIONS.forEach(status => {
+      statusFilter.innerHTML += `<option value="${escapeAttr(status)}">${escapeHTML(status)}</option>`;
+    });
+  }
+
+  function renderAllLeads() {
+    populateAllLeadsFilters();
+    filterAllLeads();
+  }
+
+  function filterAllLeads() {
+    const search = $("allLeadSearch").value.trim().toLowerCase();
+    const projectId = $("allProjectFilter").value;
+    const status = $("allStatusFilter").value;
+
+    let items = collectAllLeads();
+    if (projectId) items = items.filter(item => String(item.projectId) === String(projectId));
+    if (status) items = items.filter(item => statusValue(item.lead, item.statusColumn) === status);
+    if (search) {
+      items = items.filter(item => {
+        const values = [item.projectName, ...item.columns.map(c => String(item.lead[c] ?? ""))];
+        if (item.statusColumn) values.push(statusValue(item.lead, item.statusColumn));
+        return values.join(" ").toLowerCase().includes(search);
+      });
+    }
+    drawAllLeads(items);
+  }
+
+  function renderConnections() {
+    const container = $("connectionList");
+    if (!projects.length) {
+      container.innerHTML = '<div class="empty-state"><p>No connected projects yet.</p></div>';
+      return;
+    }
+    container.innerHTML = projects.map(project => `
+      <div class="connection-item">
+        <div class="connection-info">
+          <strong>${escapeHTML(project.name)}</strong>
+          <span>${escapeHTML(project.spreadsheetName || project.spreadsheetId)} · ${escapeHTML(project.sheetName)} · Last sync: ${escapeHTML(when(project.lastSync))}</span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <span class="connected">● Connected</span>
+          <button class="btn btn-danger" type="button" onclick="removeProject(${project.id})">Remove</button>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  async function loadSpreadsheets() {
+    const select = $("spreadsheetSelect");
+    const tabSelect = $("sheetSelect");
+    select.innerHTML = '<option value="">Loading spreadsheets...</option>';
+    tabSelect.innerHTML = '<option value="">Select spreadsheet first</option>';
+    tabSelect.disabled = true;
+    selectedSpreadsheet = null;
+    selectedTab = null;
+
     try {
-      list.append(el("p", { className: "empty", textContent: "Loading accessible spreadsheets…" }));
-      ({ spreadsheets: sheets } = await api("/api/sheets"));
-      draw();
-      search.focus();
-    } catch (e) {
-      error.replaceChildren(note(e.message, "error"));
-      list.replaceChildren();
+      const result = await api("/api/sheets");
+      spreadsheets = result.spreadsheets || [];
+      if (!spreadsheets.length) {
+        select.innerHTML = '<option value="">No spreadsheets found</option>';
+        return;
+      }
+      select.innerHTML = '<option value="">Select a spreadsheet</option>';
+      spreadsheets.forEach(sheet => {
+        select.innerHTML += `<option value="${escapeAttr(sheet.id)}">${escapeHTML(sheet.name || "Untitled spreadsheet")}</option>`;
+      });
+    } catch (err) {
+      select.innerHTML = '<option value="">Unable to load spreadsheets</option>';
+      showToast(err.message);
     }
   }
 
-  login.onclick = () => location.assign("/api/auth/google?returnTo=/");
-  logout.onclick = async () => {
-    try {
-      await api("/api/auth/logout", { method: "POST" });
-      location.assign("/");
-    } catch (e) {
-      status.textContent = e.message;
-    }
-  };
+  async function onSpreadsheetChange() {
+    const select = $("spreadsheetSelect");
+    const tabSelect = $("sheetSelect");
+    const sheetId = select.value;
+    selectedSpreadsheet = spreadsheets.find(s => s.id === sheetId) || null;
+    selectedTab = null;
+    tabSelect.innerHTML = '<option value="">Loading tabs...</option>';
+    tabSelect.disabled = true;
 
-  (async () => {
+    if (!selectedSpreadsheet) {
+      tabSelect.innerHTML = '<option value="">Select spreadsheet first</option>';
+      return;
+    }
+
+    if (!$("projectNameInput").value.trim()) {
+      $("projectNameInput").value = selectedSpreadsheet.name || "";
+    }
+
     try {
-      const auth = await api("/api/auth/me");
-      if (!auth.authenticated) {
-        status.textContent = "Sign in with the configured administrator Google account to continue.";
+      const result = await api(`/api/sheets/${encodeURIComponent(selectedSpreadsheet.id)}/tabs`);
+      const tabs = result.tabs || [];
+      tabSelect.innerHTML = '<option value="">Select a tab</option>';
+      tabs.forEach(tab => {
+        tabSelect.innerHTML += `<option value="${escapeAttr(String(tab.sheetId))}" data-title="${escapeAttr(tab.title)}">${escapeHTML(tab.title)}</option>`;
+      });
+      tabSelect.disabled = false;
+    } catch (err) {
+      tabSelect.innerHTML = '<option value="">Unable to load tabs</option>';
+      showToast(err.message);
+    }
+  }
+
+  function onTabChange() {
+    const tabSelect = $("sheetSelect");
+    const option = tabSelect.selectedOptions[0];
+    if (!option || !option.value) {
+      selectedTab = null;
+      return;
+    }
+    selectedTab = {
+      sheetId: Number(option.value),
+      sheetTitle: option.dataset.title || option.textContent
+    };
+  }
+
+  async function getProjects() {
+    const result = await api("/api/projects");
+    projects = result.projects || [];
+  }
+
+  async function fetchProjectLeads(projectId, { silent = false } = {}) {
+    if (!silent) showLoading("Loading leads...");
+    try {
+      const data = await api(`/api/projects/${projectId}/leads`);
+      setCache(data);
+      const index = projects.findIndex(p => p.id === projectId);
+      if (index >= 0) {
+        projects[index] = {
+          ...projects[index],
+          name: data.name,
+          sheetName: data.sheetName,
+          spreadsheetName: data.spreadsheetName,
+          lastSync: data.lastSync,
+          columns: data.columns
+        };
+      }
+      return data;
+    } finally {
+      if (!silent) hideLoading();
+    }
+  }
+
+  async function warmLeadsCache() {
+    if (!projects.length) return;
+    showLoading("Loading project leads...");
+    try {
+      await Promise.all(projects.map(p => fetchProjectLeads(p.id, { silent: true }).catch(() => null)));
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function setSyncButtonsDisabled(disabled) {
+    syncing = disabled;
+    $("syncAllBtn").disabled = disabled;
+    const detailSync = $("detailSyncBtn");
+    if (detailSync) detailSync.disabled = disabled;
+  }
+
+  async function syncAllSheets() {
+    if (syncing) return;
+    setSyncButtonsDisabled(true);
+    showLoading("Syncing all Google Sheets...");
+    try {
+      await api("/api/sync", { method: "POST" });
+      await getProjects();
+      await warmLeadsCache();
+      updateSyncText();
+      loadDashboard();
+      showToast("All Google Sheets synced successfully.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+      setSyncButtonsDisabled(false);
+    }
+  }
+
+  async function syncCurrentProject() {
+    if (!currentProjectId || syncing) return;
+    setSyncButtonsDisabled(true);
+    $("detailRefreshBtn").disabled = true;
+    showLoading("Syncing project...");
+    try {
+      const result = await api(`/api/projects/${currentProjectId}/sync`, { method: "POST" });
+      setCache(result.project);
+      const index = projects.findIndex(p => p.id === currentProjectId);
+      if (index >= 0) {
+        projects[index] = {
+          ...projects[index],
+          name: result.project.name,
+          sheetName: result.project.sheetName,
+          spreadsheetName: result.project.spreadsheetName,
+          lastSync: result.project.lastSync,
+          columns: result.project.columns
+        };
+      }
+      updateSyncText();
+      renderProjectDetail();
+      showToast(result.sync?.message || "Project synced.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+      $("detailRefreshBtn").disabled = false;
+      setSyncButtonsDisabled(false);
+    }
+  }
+
+  async function refreshCurrentProject() {
+    if (!currentProjectId) return;
+    $("detailRefreshBtn").disabled = true;
+    showLoading("Refreshing leads...");
+    try {
+      await fetchProjectLeads(currentProjectId, { silent: true });
+      renderProjectDetail();
+      showToast("Leads refreshed.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+      $("detailRefreshBtn").disabled = false;
+    }
+  }
+
+  async function addLeadStatusColumn() {
+    if (!currentProjectId) return;
+    const btn = $("addStatusColumnBtn");
+    btn.disabled = true;
+    showLoading("Adding Lead Status column...");
+    try {
+      const result = await api(`/api/projects/${currentProjectId}/lead-status-column`, { method: "POST" });
+      setCache(result.project);
+      renderProjectDetail();
+      showToast("Lead Status column added.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+      btn.disabled = false;
+    }
+  }
+
+  async function openProject(projectId) {
+    currentProjectId = projectId;
+    document.querySelectorAll(".view").forEach(view => view.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach(item => item.classList.remove("active"));
+    $("projectDetailView").classList.add("active");
+
+    const project = projects.find(p => p.id === projectId);
+    $("pageTitle").textContent = project?.name || "Project";
+    $("pageSubtitle").textContent = "Project Lead Dashboard";
+
+    if (!leadsCache[projectId]) {
+      try {
+        await fetchProjectLeads(projectId);
+      } catch (err) {
+        showToast(err.message);
         return;
       }
+    }
+    renderProjectDetail();
+    closeSidebar();
+  }
+
+  function showView(viewName, element) {
+    if (viewName !== "projectDetail") currentProjectId = null;
+
+    document.querySelectorAll(".view").forEach(view => view.classList.remove("active"));
+    const target = $(`${viewName}View`);
+    if (target) target.classList.add("active");
+
+    document.querySelectorAll(".nav-item[data-view]").forEach(item => item.classList.remove("active"));
+    if (element) element.classList.add("active");
+
+    if (VIEW_TITLES[viewName]) {
+      $("pageTitle").textContent = VIEW_TITLES[viewName][0];
+      $("pageSubtitle").textContent = VIEW_TITLES[viewName][1];
+    }
+
+    if (viewName === "dashboard") loadDashboard();
+    if (viewName === "projects") renderProjectsGrid("allProjects");
+    if (viewName === "connections") {
+      renderConnections();
+      loadSpreadsheets();
+    }
+    if (viewName === "allLeads") renderAllLeads();
+    closeSidebar();
+  }
+
+  function filterLeads() {
+    renderLeadTableRows(filteredProjectLeads());
+  }
+
+  function clearFilters() {
+    $("leadSearch").value = "";
+    $("statusFilter").value = "";
+    $("sourceFilter").value = "";
+    filterLeads();
+  }
+
+  async function saveProjectConnection() {
+    const name = $("projectNameInput").value.trim();
+    if (!name) {
+      showToast("Please enter a project name.");
+      return;
+    }
+    if (!selectedSpreadsheet || !selectedTab) {
+      showToast("Select a spreadsheet and tab.");
+      return;
+    }
+
+    const btn = $("saveProjectBtn");
+    btn.disabled = true;
+    showLoading("Saving project...");
+    try {
+      const created = await api("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          spreadsheetId: selectedSpreadsheet.id,
+          sheetId: selectedTab.sheetId,
+          sheetTitle: selectedTab.sheetTitle
+        })
+      });
+      await getProjects();
+      if (created.project?.id) {
+        await fetchProjectLeads(created.project.id, { silent: true }).catch(() => null);
+      }
+      $("projectNameInput").value = "";
+      $("spreadsheetSelect").value = "";
+      $("sheetSelect").innerHTML = '<option value="">Select spreadsheet first</option>';
+      $("sheetSelect").disabled = true;
+      selectedSpreadsheet = null;
+      selectedTab = null;
+      renderConnections();
+      loadDashboard();
+      showToast("Project connected successfully.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+      btn.disabled = false;
+    }
+  }
+
+  async function removeProject(id) {
+    if (!confirm("Remove this project connection? The Google Sheet will not be deleted.")) return;
+    showLoading("Removing project...");
+    try {
+      await api(`/api/projects/${id}`, { method: "DELETE" });
+      projects = projects.filter(p => p.id !== id);
+      delete leadsCache[id];
+      if (currentProjectId === id) currentProjectId = null;
+      renderConnections();
+      loadDashboard();
+      showToast("Project removed.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function googleLogin() {
+    location.assign("/api/auth/google?returnTo=/");
+  }
+
+  async function logout() {
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* proceed to login screen */
+    }
+    location.assign("/");
+  }
+
+  async function init() {
+    try {
+      const auth = await api("/api/auth/me");
+      if (!auth.authenticated) return;
+
+      user = auth.user;
       ({ csrfToken } = await api("/api/csrf"));
       await getProjects();
-      login.hidden = true;
-      logout.hidden = false;
-      app.hidden = false;
-      status.textContent = `Signed in as ${auth.user.email}.`;
-      projectsView();
-    } catch (e) {
-      status.textContent = e.message;
+      setUserUI();
+
+      $("loginScreen").style.display = "none";
+      $("app").style.display = "block";
+
+      await warmLeadsCache();
+      loadDashboard();
+    } catch (err) {
+      showToast(err.message);
     }
-  })();
+  }
+
+  window.googleLogin = googleLogin;
+  window.logout = logout;
+  window.showView = showView;
+  window.toggleSidebar = toggleSidebar;
+  window.syncAllSheets = syncAllSheets;
+  window.openProject = openProject;
+  window.filterLeads = filterLeads;
+  window.clearFilters = clearFilters;
+  window.filterAllLeads = filterAllLeads;
+  window.saveProjectConnection = saveProjectConnection;
+  window.removeProject = removeProject;
+  window.syncCurrentProject = syncCurrentProject;
+  window.refreshCurrentProject = refreshCurrentProject;
+  window.addLeadStatusColumn = addLeadStatusColumn;
+
+  document.addEventListener("DOMContentLoaded", () => {
+    $("spreadsheetSelect").addEventListener("change", onSpreadsheetChange);
+    $("sheetSelect").addEventListener("change", onTabChange);
+    init();
+  });
 })();
