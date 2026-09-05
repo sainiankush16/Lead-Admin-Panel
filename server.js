@@ -8,7 +8,13 @@ const session = require("express-session");
 const db = require("./db");
 const SQLiteSessionStore = require("./session-store");
 const { getKey, encrypt, decrypt } = require("./crypto");
-const { resolveAdminUser, csrfTokensMatch, safeEqual } = require("./api-guards");
+const { resolveAdminUser, csrfTokensMatch } = require("./api-guards");
+const {
+  shouldTrustProxy,
+  requiresHttpsBaseUrl,
+  buildSessionOptions,
+  isValidOauthCallback
+} = require("./session-config");
 const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-data");
 const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
 const { buildSyncSnapshot, compareSheetToSnapshot, syncInProgressGuard } = require("./sync-snapshot");
@@ -42,12 +48,12 @@ try {
 } catch {
   throw new Error("BASE_URL must be an absolute URL.");
 }
-if (isProduction && parsedBaseUrl.protocol !== "https:") {
+if (requiresHttpsBaseUrl() && parsedBaseUrl.protocol !== "https:") {
   throw new Error("BASE_URL must use HTTPS in production.");
 }
 
 app.disable("x-powered-by");
-const trustProxy = process.env.TRUST_PROXY === "true" || process.env.VERCEL === "1";
+const trustProxy = shouldTrustProxy();
 app.set("trust proxy", trustProxy ? 1 : false);
 app.use(helmet());
 app.use(express.json({ limit: "100kb" }));
@@ -60,14 +66,11 @@ app.use(async (req, res, next) => {
     next(err);
   }
 });
-app.use(session({
-  name: "lead_admin_sid",
-  store: new SQLiteSessionStore(db),
+app.use(session(buildSessionOptions({
+  isProduction,
   secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: "lax", secure: isProduction, maxAge: 1000 * 60 * 60 * 24 * 7 }
-}));
+  store: new SQLiteSessionStore(db)
+})));
 app.use("/api", (req, res, next) => {
   res.set("Cache-Control", "no-store");
   next();
@@ -289,8 +292,11 @@ app.get("/api/auth/google", async (req, res, next) => {
 });
 
 app.get("/api/auth/google/callback", async (req, res) => {
-  const validState = safeEqual(String(req.query.state || ""), req.session.oauthState || "");
-  if (!req.query.code || !validState) {
+  if (!isValidOauthCallback({
+    code: req.query.code,
+    requestState: req.query.state,
+    sessionState: req.session.oauthState
+  })) {
     delete req.session.oauthState;
     return res.status(400).send("Invalid OAuth request. Please try again.");
   }
