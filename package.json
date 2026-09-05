@@ -1,0 +1,24 @@
+{
+  "name": "lead-admin-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure Google OAuth + Google Sheets backend for a project-wise lead admin panel",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "lint": "node --check server.js && node --check db.js && node --check google.js && node --check sheet-data.js && node --check crypto.js && node --check session-store.js && node --check lead-status.js && node --check lead-status-ops.js && node --check api-guards.js && node --check public/app.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "express-session": "^1.18.1",
+    "googleapis": "^178.0.0",
+    "helmet": "^8.3.0"
+  }
+}
