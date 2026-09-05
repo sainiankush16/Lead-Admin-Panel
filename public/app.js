@@ -400,7 +400,7 @@
     $("statusColumnWarning").classList.toggle("hidden", hasCol);
   }
 
-  function buildStatusSelect(lead, column, rowNumber, row) {
+  function buildStatusSelect(lead, column, rowNumber, updatingEl) {
     let saved = statusValue(lead, column);
     const select = document.createElement("select");
     select.setAttribute("aria-label", "Lead Status");
@@ -419,7 +419,7 @@
       const nextStatus = select.value;
       if (nextStatus === saved) return;
       select.disabled = true;
-      row.classList.add("row-updating");
+      if (updatingEl) updatingEl.classList.add("row-updating");
       try {
         const result = await api(`/api/projects/${currentProjectId}/leads/${rowNumber}/status`, {
           method: "PATCH",
@@ -437,11 +437,121 @@
         select.value = saved;
         showToast(err.message);
       } finally {
-        row.classList.remove("row-updating");
+        if (updatingEl) updatingEl.classList.remove("row-updating");
         select.disabled = !rowNumber;
       }
     });
     return select;
+  }
+
+  function phoneHelpers() {
+    return globalThis.LeadPhoneHelpers || {};
+  }
+
+  function createContactAction({ href, label, ariaLabel, className }) {
+    if (href) {
+      const link = document.createElement("a");
+      link.className = `btn ${className}`;
+      link.href = href;
+      link.textContent = label;
+      link.setAttribute("aria-label", ariaLabel);
+      link.title = ariaLabel;
+      if (href.startsWith("https://wa.me/")) {
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+      }
+      return link;
+    }
+    const disabled = document.createElement("span");
+    disabled.className = `btn ${className} is-disabled`;
+    disabled.textContent = label;
+    disabled.setAttribute("aria-disabled", "true");
+    disabled.setAttribute("aria-label", `${ariaLabel} unavailable`);
+    disabled.title = "Phone number unavailable";
+    disabled.tabIndex = -1;
+    return disabled;
+  }
+
+  function renderLeadMobileCards(leads) {
+    const cached = activeProject();
+    const list = $("leadMobileList");
+    if (!list || !cached) return;
+
+    const helpers = phoneHelpers();
+    const columns = cached.columns || [];
+    const statusCol = statusColumn(columns);
+    const nameCol = helpers.findNameColumn ? helpers.findNameColumn(columns) : findColumn(columns, "Name");
+    const phoneCol = helpers.findPhoneColumn ? helpers.findPhoneColumn(columns) : findColumn(columns, "Phone");
+
+    list.replaceChildren();
+
+    if (!columns.length) {
+      list.innerHTML = '<div class="lead-mobile-empty">This sheet has no header row.</div>';
+      return;
+    }
+    if (!leads.length) {
+      list.innerHTML = '<div class="lead-mobile-empty">No leads match the current filters.</div>';
+      return;
+    }
+
+    leads.forEach(({ lead, rowNumber }) => {
+      const card = document.createElement("article");
+      card.className = "lead-mobile-card";
+
+      const nameText = nameCol ? String(lead[nameCol] ?? "").trim() : "";
+      const phoneText = phoneCol ? String(lead[phoneCol] ?? "").trim() : "";
+      const displayName = nameText || "Unnamed lead";
+      const links = helpers.normalizePhoneForLinks
+        ? helpers.normalizePhoneForLinks(phoneText)
+        : null;
+
+      const nameEl = document.createElement("div");
+      nameEl.className = "lead-mobile-name";
+      nameEl.textContent = displayName;
+      card.appendChild(nameEl);
+
+      const phoneEl = document.createElement("div");
+      phoneEl.className = "lead-mobile-phone";
+      phoneEl.textContent = phoneText || "No phone number";
+      card.appendChild(phoneEl);
+
+      const actions = document.createElement("div");
+      actions.className = "lead-mobile-actions";
+      actions.appendChild(createContactAction({
+        href: links?.telHref || null,
+        label: "☎ Call Now",
+        ariaLabel: `Call ${displayName}`,
+        className: "btn-light"
+      }));
+      actions.appendChild(createContactAction({
+        href: links?.waHref || null,
+        label: "WhatsApp",
+        ariaLabel: `WhatsApp ${displayName}`,
+        className: "btn-primary"
+      }));
+      card.appendChild(actions);
+
+      const statusWrap = document.createElement("div");
+      statusWrap.className = "lead-mobile-status";
+      const statusLabel = document.createElement("label");
+      const statusId = `lead-status-${rowNumber || "x"}-${Math.random().toString(36).slice(2, 8)}`;
+      statusLabel.textContent = "Lead Status";
+      statusLabel.htmlFor = statusId;
+      statusWrap.appendChild(statusLabel);
+      if (statusCol) {
+        const select = buildStatusSelect(lead, statusCol, rowNumber, card);
+        select.id = statusId;
+        statusWrap.appendChild(select);
+      } else {
+        const missing = document.createElement("div");
+        missing.className = "lead-mobile-phone";
+        missing.textContent = "Lead Status column not found";
+        statusWrap.appendChild(missing);
+      }
+      card.appendChild(statusWrap);
+
+      list.appendChild(card);
+    });
   }
 
   function renderLeadTableRows(leads) {
@@ -458,10 +568,12 @@
 
     if (!columns.length) {
       body.innerHTML = `<tr><td colspan="1" style="text-align:center;padding:40px;color:#6b7280;">This sheet has no header row.</td></tr>`;
+      renderLeadMobileCards([]);
       return;
     }
     if (!leads.length) {
       body.innerHTML = `<tr><td colspan="${columns.length}" style="text-align:center;padding:40px;color:#6b7280;">No leads match the current filters.</td></tr>`;
+      renderLeadMobileCards([]);
       return;
     }
 
@@ -480,6 +592,8 @@
       });
       body.appendChild(row);
     });
+
+    renderLeadMobileCards(leads);
   }
 
   function filteredProjectLeads() {
