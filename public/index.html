@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Lead Admin Panel</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -986,6 +986,22 @@
         @media (max-width: 767px) {
             .lead-desktop-table { display: none; }
             .lead-mobile-list { display: flex; }
+
+            /* iOS Safari auto-zooms focused controls under 16px; keep desktop sizes unchanged. */
+            input,
+            textarea,
+            select,
+            .login-box .form-group input,
+            .search-box input,
+            .toolbar select,
+            .form-group input,
+            .form-group select,
+            td select,
+            .lead-mobile-status select,
+            .lead-detail-status select,
+            .remark-compose textarea {
+                font-size: 16px;
+            }
         }
 
         @media (max-width: 550px) {
