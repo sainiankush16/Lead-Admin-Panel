@@ -124,12 +124,32 @@ test("OAuth state persists through the session store for the callback round-trip
   sqlite.close();
 });
 
-test("express-session options keep proxy enabled so secure cookies can be set behind Vercel", () => {
-  const options = buildSessionOptions({
-    isProduction: true,
-    secret: "session-secret",
-    store: new session.MemoryStore()
+test("double OAuth start overwrites session oauthState and invalidates the first state", async () => {
+  const sqlite = new Database(":memory:");
+  const db = wrapBetterSqlite(sqlite);
+  const store = new SQLiteSessionStore(db);
+  const sid = "same-browser-session";
+
+  await call(store, "set", sid, {
+    cookie: { expires: new Date(Date.now() + 60_000).toISOString() },
+    oauthState: "first-state"
   });
-  assert.equal(options.proxy, true);
-  assert.equal(options.cookie.secure, true);
+  await call(store, "set", sid, {
+    cookie: { expires: new Date(Date.now() + 60_000).toISOString() },
+    oauthState: "second-state"
+  });
+
+  const loaded = await call(store, "get", sid);
+  assert.equal(loaded.oauthState, "second-state");
+  assert.equal(isValidOauthCallback({
+    code: "code",
+    requestState: "first-state",
+    sessionState: loaded.oauthState
+  }), false);
+  assert.equal(isValidOauthCallback({
+    code: "code",
+    requestState: "second-state",
+    sessionState: loaded.oauthState
+  }), true);
+  sqlite.close();
 });

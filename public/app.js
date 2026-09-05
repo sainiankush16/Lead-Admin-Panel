@@ -20,6 +20,8 @@
   let selectedSpreadsheet = null;
   let selectedTab = null;
   let toastTimer = null;
+  let uiBound = false;
+  let googleLoginStarted = false;
 
   const $ = id => document.getElementById(id);
 
@@ -911,6 +913,12 @@
   }
 
   function googleLogin() {
+    // Once-guard: double-clicks can fire two navigations before unload and
+    // overwrite oauthState / rotate the session cookie mid-login.
+    if (googleLoginStarted) return;
+    googleLoginStarted = true;
+    const btn = $("googleLoginBtn");
+    if (btn) btn.disabled = true;
     location.assign("/api/auth/google?returnTo=/");
   }
 
@@ -924,6 +932,9 @@
   }
 
   function bindUi() {
+    if (uiBound) return;
+    uiBound = true;
+
     const on = (id, event, handler) => {
       const node = $(id);
       if (node) node.addEventListener(event, handler);

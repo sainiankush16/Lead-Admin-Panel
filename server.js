@@ -13,8 +13,17 @@ const {
   shouldTrustProxy,
   requiresHttpsBaseUrl,
   buildSessionOptions,
-  isValidOauthCallback
+  buildSessionCookieOptions,
+  isValidOauthCallback,
+  oauthStatesMatch
 } = require("./session-config");
+const {
+  buildOauthStartDiagnostics,
+  buildOauthCallbackDiagnostics,
+  logOauthDiagnostic,
+  lookupSessionStore,
+  onResponseHeaders
+} = require("./oauth-diagnostics");
 const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-data");
 const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
 const { buildSyncSnapshot, compareSheetToSnapshot, syncInProgressGuard } = require("./sync-snapshot");
@@ -66,10 +75,11 @@ app.use(async (req, res, next) => {
     next(err);
   }
 });
+const sessionStore = new SQLiteSessionStore(db);
 app.use(session(buildSessionOptions({
   isProduction,
   secret: process.env.SESSION_SECRET,
-  store: new SQLiteSessionStore(db)
+  store: sessionStore
 })));
 app.use("/api", (req, res, next) => {
   res.set("Cache-Control", "no-store");
@@ -284,7 +294,39 @@ app.get("/api/auth/google", async (req, res, next) => {
     const state = randomValue();
     req.session.oauthState = state;
     req.session.oauthReturnTo = safeReturnTo(req.query.returnTo);
-    await saveSession(req);
+    let saveSucceeded = false;
+    try {
+      await saveSession(req);
+      saveSucceeded = true;
+    } catch (saveErr) {
+      logOauthDiagnostic(buildOauthStartDiagnostics({
+        req,
+        res,
+        isProduction,
+        expectedHost: parsedBaseUrl.host,
+        saveSucceeded: false,
+        oauthStateGenerated: true,
+        sessionId: req.sessionID,
+        oauthState: state,
+        cookieIntended: buildSessionCookieOptions(isProduction)
+      }));
+      throw saveErr;
+    }
+
+    // express-session writes Set-Cookie when headers are sent; inspect then.
+    onResponseHeaders(res, () => {
+      logOauthDiagnostic(buildOauthStartDiagnostics({
+        req,
+        res,
+        isProduction,
+        expectedHost: parsedBaseUrl.host,
+        saveSucceeded,
+        oauthStateGenerated: true,
+        sessionId: req.sessionID,
+        oauthState: state,
+        cookieIntended: buildSessionCookieOptions(isProduction)
+      }));
+    });
     res.redirect(getAuthUrl(state));
   } catch (err) {
     next(err);
@@ -292,10 +334,24 @@ app.get("/api/auth/google", async (req, res, next) => {
 });
 
 app.get("/api/auth/google/callback", async (req, res) => {
+  const requestState = req.query.state;
+  const sessionState = req.session.oauthState;
+  const statesMatch = oauthStatesMatch(requestState, sessionState);
+  const storeLookupSucceeded = await lookupSessionStore(sessionStore, req.sessionID);
+  logOauthDiagnostic(buildOauthCallbackDiagnostics({
+    req,
+    isProduction,
+    expectedHost: parsedBaseUrl.host,
+    requestState,
+    sessionState,
+    statesMatch,
+    storeLookupSucceeded
+  }));
+
   if (!isValidOauthCallback({
     code: req.query.code,
-    requestState: req.query.state,
-    sessionState: req.session.oauthState
+    requestState,
+    sessionState
   })) {
     delete req.session.oauthState;
     return res.status(400).send("Invalid OAuth request. Please try again.");
