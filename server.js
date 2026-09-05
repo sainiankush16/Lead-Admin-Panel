@@ -8,7 +8,25 @@ const session = require("express-session");
 const db = require("./db");
 const SQLiteSessionStore = require("./session-store");
 const { getKey, encrypt, decrypt } = require("./crypto");
-const { resolveAdminUser, csrfTokensMatch } = require("./api-guards");
+const { csrfTokensMatch } = require("./api-guards");
+const {
+  ROLES,
+  sanitizeAppUser,
+  resolveAuthenticatedUser,
+  resolveAdminRole,
+  canAccessProject
+} = require("./authz");
+const {
+  bootstrapAdminUser,
+  findAppUserById,
+  authenticateAppUser,
+  listAppUsers,
+  createProjectUser,
+  setUserActive,
+  resetUserPassword,
+  replaceUserProjects,
+  userHasProjectAssignment
+} = require("./app-users");
 const {
   shouldTrustProxy,
   requiresHttpsBaseUrl,
@@ -37,6 +55,8 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
 const isProduction = process.env.NODE_ENV === "production";
 const ADMIN_EMAIL = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+const ADMIN_LOGIN_ID = String(process.env.ADMIN_LOGIN_ID || "").trim();
+const ADMIN_PASSWORD_HASH = String(process.env.ADMIN_PASSWORD_HASH || "").trim();
 const projectSyncGuard = syncInProgressGuard();
 
 function requireEnvironment(name) {
@@ -49,6 +69,8 @@ requireEnvironment("GOOGLE_CLIENT_SECRET");
 requireEnvironment("GOOGLE_REDIRECT_URI");
 requireEnvironment("TOKEN_ENCRYPTION_KEY");
 requireEnvironment("ADMIN_EMAIL");
+requireEnvironment("ADMIN_LOGIN_ID");
+requireEnvironment("ADMIN_PASSWORD_HASH");
 getKey();
 
 let parsedBaseUrl;
@@ -104,15 +126,32 @@ function safeReturnTo(value) {
   }
 }
 
-function currentUser(req) {
-  if (!req.session.userId) return Promise.resolve(null);
-  return db.prepare("SELECT * FROM users WHERE id = ?").get(req.session.userId).then(user => user || null);
+async function currentAppUser(req) {
+  if (!req.session.userId || !req.session.role) return null;
+  const user = await findAppUserById(db, req.session.userId);
+  if (!user || !user.is_active) return null;
+  if (user.role !== req.session.role) return null;
+  const sessionVersion = Number(req.session.sessionVersion || 0);
+  if (sessionVersion !== Number(user.session_version || 0)) return null;
+  return user;
 }
 
 async function requireAuth(req, res, next) {
   try {
-    const user = await currentUser(req);
-    const access = resolveAdminUser(user, ADMIN_EMAIL);
+    const user = await currentAppUser(req);
+    const access = resolveAuthenticatedUser(user);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    req.user = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function requireAdmin(req, res, next) {
+  try {
+    const user = await currentAppUser(req);
+    const access = resolveAdminRole(user);
     if (!access.ok) return res.status(access.status).json({ error: access.error });
     req.user = user;
     next();
@@ -141,13 +180,35 @@ function regenerateSession(req) {
   return new Promise((resolve, reject) => req.session.regenerate(err => err ? reject(err) : resolve()));
 }
 
-function googleClientForUser(user) {
-  if (!user.refresh_token_enc) {
+async function establishAppSession(req, user) {
+  await regenerateSession(req);
+  req.session.userId = Number(user.id);
+  req.session.role = user.role;
+  req.session.sessionVersion = Number(user.session_version || 1);
+  await saveSession(req);
+}
+
+async function getGoogleConnection() {
+  return await db.prepare("SELECT * FROM users WHERE lower(email) = ?").get(ADMIN_EMAIL) || null;
+}
+
+function googleClientForConnection(connection) {
+  if (!connection?.refresh_token_enc) {
     const error = new Error("Google authorization is missing.");
     error.code = "GOOGLE_RECONNECT_REQUIRED";
     throw error;
   }
-  return clientFromRefreshToken(decrypt(user.refresh_token_enc));
+  return clientFromRefreshToken(decrypt(connection.refresh_token_enc));
+}
+
+async function requireGoogleConnection(req, res) {
+  const connection = await getGoogleConnection();
+  if (!connection?.refresh_token_enc) {
+    res.status(401).json({ error: "Google authorization has expired. Please reconnect Google." });
+    return null;
+  }
+  req.googleConnection = connection;
+  return connection;
 }
 
 function parseColumns(columnsJson) {
@@ -178,20 +239,45 @@ function projectWithLeads(row, data) {
   };
 }
 
-async function loadUserProject(projectId, userId) {
-  return await db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, userId) || null;
+async function loadProjectById(projectId) {
+  return await db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId) || null;
 }
 
-async function refreshProjectLeads(user, project, { touchLastSync = false } = {}) {
-  const data = await readSheet(googleClientForUser(user), project.spreadsheet_id, project.sheet_title);
-  if (touchLastSync) {
-    await db.prepare("UPDATE projects SET columns_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
-      .run(JSON.stringify(data.columns), project.id, user.id);
-  } else {
-    await db.prepare("UPDATE projects SET columns_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?")
-      .run(JSON.stringify(data.columns), project.id, user.id);
+async function loadAuthorizedProject(appUser, projectId) {
+  const project = await loadProjectById(projectId);
+  if (!project) {
+    if (appUser.role === ROLES.ADMIN) return { error: "Project not found.", statusCode: 404 };
+    return { error: "Not authorized.", statusCode: 403 };
   }
-  const fresh = await loadUserProject(project.id, user.id);
+  if (appUser.role === ROLES.ADMIN) return { value: project };
+  const assigned = await userHasProjectAssignment(db, appUser.id, projectId);
+  const access = canAccessProject(appUser, assigned);
+  if (!access.ok) return { error: access.error, statusCode: access.status };
+  return { value: project };
+}
+
+async function listAuthorizedProjects(appUser) {
+  if (appUser.role === ROLES.ADMIN) {
+    return db.prepare("SELECT * FROM projects ORDER BY name COLLATE NOCASE").all();
+  }
+  return db.prepare(`
+    SELECT p.* FROM projects p
+    INNER JOIN project_user_assignments a ON a.project_id = p.id
+    WHERE a.user_id = ?
+    ORDER BY p.name COLLATE NOCASE
+  `).all(appUser.id);
+}
+
+async function refreshProjectLeads(connection, project, { touchLastSync = false } = {}) {
+  const data = await readSheet(googleClientForConnection(connection), project.spreadsheet_id, project.sheet_title);
+  if (touchLastSync) {
+    await db.prepare("UPDATE projects SET columns_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(JSON.stringify(data.columns), project.id);
+  } else {
+    await db.prepare("UPDATE projects SET columns_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(JSON.stringify(data.columns), project.id);
+  }
+  const fresh = await loadProjectById(project.id);
   return projectWithLeads(fresh, data);
 }
 
@@ -213,8 +299,8 @@ async function assertProjectTabExists(client, project) {
   return tab;
 }
 
-async function syncUserProject(user, project) {
-  const client = googleClientForUser(user);
+async function syncProject(connection, project) {
+  const client = googleClientForConnection(connection);
   await assertProjectTabExists(client, project);
   const data = await readSheet(client, project.spreadsheet_id, project.sheet_title);
   const comparison = compareSheetToSnapshot(
@@ -225,9 +311,9 @@ async function syncUserProject(user, project) {
   );
   await db.prepare(`UPDATE projects
     SET columns_json = ?, sync_snapshot_json = ?, last_sync = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND user_id = ?`)
-    .run(JSON.stringify(data.columns), JSON.stringify(comparison.snapshot), project.id, user.id);
-  const fresh = await loadUserProject(project.id, user.id);
+    WHERE id = ?`)
+    .run(JSON.stringify(data.columns), JSON.stringify(comparison.snapshot), project.id);
+  const fresh = await loadProjectById(project.id);
   return {
     project: projectWithLeads(fresh, data),
     sync: {
@@ -289,11 +375,22 @@ function sendGoogleError(res, context, err) {
 
 /* -------------------- AUTH -------------------- */
 
-app.get("/api/auth/google", async (req, res, next) => {
+app.post("/api/auth/login", async (req, res, next) => {
+  try {
+    const result = await authenticateAppUser(db, req.body?.loginId, req.body?.password);
+    if (!result.ok) return res.status(401).json({ error: result.error });
+    await establishAppSession(req, result.user);
+    res.json({ user: sanitizeAppUser(result.user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/auth/google", requireAdmin, async (req, res, next) => {
   try {
     const state = randomValue();
     req.session.oauthState = state;
-    req.session.oauthReturnTo = safeReturnTo(req.query.returnTo);
+    req.session.oauthReturnTo = safeReturnTo(req.query.returnTo || "/");
     let saveSucceeded = false;
     try {
       await saveSession(req);
@@ -313,7 +410,6 @@ app.get("/api/auth/google", async (req, res, next) => {
       throw saveErr;
     }
 
-    // express-session writes Set-Cookie when headers are sent; inspect then.
     onResponseHeaders(res, () => {
       logOauthDiagnostic(buildOauthStartDiagnostics({
         req,
@@ -356,7 +452,15 @@ app.get("/api/auth/google/callback", async (req, res) => {
     delete req.session.oauthState;
     return res.status(400).send("Invalid OAuth request. Please try again.");
   }
-  const returnTo = safeReturnTo(req.session.oauthReturnTo);
+
+  const admin = await currentAppUser(req);
+  if (!admin || admin.role !== ROLES.ADMIN) {
+    delete req.session.oauthState;
+    delete req.session.oauthReturnTo;
+    return res.status(401).send("Admin login required before connecting Google Sheets.");
+  }
+
+  const returnTo = safeReturnTo(req.session.oauthReturnTo || "/");
   delete req.session.oauthState;
   delete req.session.oauthReturnTo;
 
@@ -364,29 +468,26 @@ app.get("/api/auth/google/callback", async (req, res) => {
     const { client, tokens } = await exchangeCode(String(req.query.code));
     const profile = await getGoogleProfile(client);
     if (!profile.email || profile.email.toLowerCase() !== ADMIN_EMAIL) {
-      return res.status(403).send("This Google account is not authorized.");
+      return res.status(403).send("This Google account is not authorized for Sheets access.");
     }
 
     const existing = await db.prepare("SELECT * FROM users WHERE google_sub = ?").get(profile.id);
-    let userId;
     if (existing) {
-      userId = existing.id;
       if (tokens.refresh_token) {
         await db.prepare("UPDATE users SET email = ?, name = ?, picture = ?, refresh_token_enc = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-          .run(profile.email, profile.name || "", profile.picture || "", encrypt(tokens.refresh_token), userId);
+          .run(profile.email, profile.name || "", profile.picture || "", encrypt(tokens.refresh_token), existing.id);
       } else {
         await db.prepare("UPDATE users SET email = ?, name = ?, picture = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-          .run(profile.email, profile.name || "", profile.picture || "", userId);
+          .run(profile.email, profile.name || "", profile.picture || "", existing.id);
       }
     } else {
-      if (!tokens.refresh_token) return res.status(400).send("Google did not provide long-term access. Reconnect the application and try again.");
-      const result = await db.prepare("INSERT INTO users (google_sub, email, name, picture, refresh_token_enc) VALUES (?, ?, ?, ?, ?)")
+      if (!tokens.refresh_token) {
+        return res.status(400).send("Google did not provide long-term access. Reconnect the application and try again.");
+      }
+      await db.prepare("INSERT INTO users (google_sub, email, name, picture, refresh_token_enc) VALUES (?, ?, ?, ?, ?)")
         .run(profile.id, profile.email, profile.name || "", profile.picture || "", encrypt(tokens.refresh_token));
-      userId = result.lastInsertRowid;
     }
 
-    await regenerateSession(req);
-    req.session.userId = Number(userId);
     await saveSession(req);
     res.redirect(returnTo);
   } catch (err) {
@@ -397,9 +498,15 @@ app.get("/api/auth/google/callback", async (req, res) => {
 
 app.get("/api/auth/me", async (req, res, next) => {
   try {
-    const user = await currentUser(req);
-    if (!user || user.email.toLowerCase() !== ADMIN_EMAIL) return res.json({ authenticated: false });
-    res.json({ authenticated: true, user: { id: user.id, name: user.name, email: user.email, picture: user.picture } });
+    const user = await currentAppUser(req);
+    if (!user) return res.json({ authenticated: false });
+    const google = await getGoogleConnection();
+    res.json({
+      authenticated: true,
+      user: sanitizeAppUser(user),
+      googleConnected: Boolean(google?.refresh_token_enc),
+      googleEmail: google?.email || null
+    });
   } catch (err) {
     next(err);
   }
@@ -409,7 +516,7 @@ app.get("/api/csrf", requireAuth, (req, res) => {
   res.json({ csrfToken: csrfToken(req) });
 });
 
-app.post("/api/auth/logout", csrfProtection, (req, res, next) => {
+app.post("/api/auth/logout", requireAuth, csrfProtection, (req, res, next) => {
   req.session.destroy(err => {
     if (err) return next(err);
     res.clearCookie("lead_admin_sid");
@@ -417,22 +524,102 @@ app.post("/api/auth/logout", csrfProtection, (req, res, next) => {
   });
 });
 
-/* -------------------- GOOGLE SHEETS -------------------- */
+/* -------------------- GOOGLE SHEETS (admin) -------------------- */
 
-app.get("/api/sheets", requireAuth, async (req, res) => {
+app.get("/api/sheets", requireAdmin, async (req, res) => {
   try {
-    res.json({ spreadsheets: await listSpreadsheets(googleClientForUser(req.user)) });
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    res.json({ spreadsheets: await listSpreadsheets(googleClientForConnection(connection)) });
   } catch (err) {
     sendGoogleError(res, "Unable to list spreadsheets", err);
   }
 });
 
-app.get("/api/sheets/:spreadsheetId/tabs", requireAuth, async (req, res) => {
+app.get("/api/sheets/:spreadsheetId/tabs", requireAdmin, async (req, res) => {
   if (!isSpreadsheetId(req.params.spreadsheetId)) return res.status(400).json({ error: "Invalid spreadsheet selection." });
   try {
-    res.json({ tabs: await getTabs(googleClientForUser(req.user), req.params.spreadsheetId) });
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    res.json({ tabs: await getTabs(googleClientForConnection(connection), req.params.spreadsheetId) });
   } catch (err) {
     sendGoogleError(res, "Unable to list sheet tabs", err);
+  }
+});
+
+app.get("/api/google/status", requireAdmin, async (req, res, next) => {
+  try {
+    const connection = await getGoogleConnection();
+    res.json({
+      connected: Boolean(connection?.refresh_token_enc),
+      email: connection?.email || null,
+      name: connection?.name || null
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* -------------------- USERS (admin) -------------------- */
+
+app.get("/api/users", requireAdmin, async (req, res, next) => {
+  try {
+    res.json({ users: await listAppUsers(db) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/users", requireAdmin, csrfProtection, async (req, res, next) => {
+  try {
+    const created = await createProjectUser(db, {
+      name: req.body?.name,
+      loginId: req.body?.loginId,
+      password: req.body?.password,
+      projectIds: req.body?.projectIds
+    });
+    if (created.error) return res.status(created.statusCode).json({ error: created.error });
+    const users = await listAppUsers(db);
+    res.status(201).json({ user: users.find(item => item.id === created.value.id) || created.value });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch("/api/users/:id/status", requireAdmin, csrfProtection, async (req, res, next) => {
+  try {
+    const id = positiveId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid user id." });
+    const isActive = Boolean(req.body?.isActive);
+    const result = await setUserActive(db, id, isActive);
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    res.json({ ok: true, users: await listAppUsers(db) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/users/:id/reset-password", requireAdmin, csrfProtection, async (req, res, next) => {
+  try {
+    const id = positiveId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid user id." });
+    const result = await resetUserPassword(db, id, req.body?.password);
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put("/api/users/:id/projects", requireAdmin, csrfProtection, async (req, res, next) => {
+  try {
+    const id = positiveId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid user id." });
+    const result = await replaceUserProjects(db, id, req.body?.projectIds);
+    if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    res.json({ ok: true, users: await listAppUsers(db) });
+  } catch (err) {
+    next(err);
   }
 });
 
@@ -440,24 +627,26 @@ app.get("/api/sheets/:spreadsheetId/tabs", requireAuth, async (req, res) => {
 
 app.get("/api/projects", requireAuth, async (req, res, next) => {
   try {
-    const rows = await db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY name COLLATE NOCASE").all(req.user.id);
+    const rows = await listAuthorizedProjects(req.user);
     res.json({ projects: rows.map(sanitizeProject) });
   } catch (err) {
     next(err);
   }
 });
 
-app.post("/api/projects", requireAuth, csrfProtection, async (req, res) => {
+app.post("/api/projects", requireAdmin, csrfProtection, async (req, res) => {
   const validated = validateProjectInput(req.body || {});
   if (validated.error) return res.status(400).json({ error: validated.error });
   try {
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
     const { name, spreadsheetId, sheetId, sheetTitle } = validated.value;
-    const client = googleClientForUser(req.user);
+    const client = googleClientForConnection(connection);
     const tabs = await getTabs(client, spreadsheetId);
     const tab = tabs.find(item => String(item.sheetId) === String(sheetId) && item.title === sheetTitle);
     if (!tab) return res.status(400).json({ error: "Selected sheet was not found." });
     const existing = await db.prepare("SELECT id FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
-      .get(req.user.id, spreadsheetId, tab.sheetId);
+      .get(connection.id, spreadsheetId, tab.sheetId);
     if (existing) return res.status(409).json({ error: "This spreadsheet tab is already connected as a project." });
     const spreadsheet = (await listSpreadsheets(client)).find(item => item.id === spreadsheetId);
     const data = await readSheet(client, spreadsheetId, tab.title);
@@ -465,7 +654,7 @@ app.post("/api/projects", requireAuth, csrfProtection, async (req, res) => {
     await db.prepare(`INSERT INTO projects (user_id, name, spreadsheet_id, spreadsheet_name, sheet_id, sheet_title, columns_json, sync_snapshot_json, last_sync)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`)
       .run(
-        req.user.id,
+        connection.id,
         name,
         spreadsheetId,
         spreadsheet ? spreadsheet.name : "",
@@ -475,19 +664,19 @@ app.post("/api/projects", requireAuth, csrfProtection, async (req, res) => {
         JSON.stringify(snapshot)
       );
     const project = await db.prepare("SELECT * FROM projects WHERE user_id = ? AND spreadsheet_id = ? AND sheet_id = ?")
-      .get(req.user.id, spreadsheetId, tab.sheetId);
-    // Lead values remain in Google Sheets. The creation response only returns configuration.
+      .get(connection.id, spreadsheetId, tab.sheetId);
     res.status(201).json({ project: sanitizeProject(project) });
   } catch (err) {
     sendGoogleError(res, "Unable to create project", err);
   }
 });
 
-app.delete("/api/projects/:id", requireAuth, csrfProtection, async (req, res, next) => {
+app.delete("/api/projects/:id", requireAdmin, csrfProtection, async (req, res, next) => {
   try {
     const id = positiveId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid project id." });
-    const result = await db.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").run(id, req.user.id);
+    await db.prepare("DELETE FROM project_user_assignments WHERE project_id = ?").run(id);
+    const result = await db.prepare("DELETE FROM projects WHERE id = ?").run(id);
     if (!result.changes) return res.status(404).json({ error: "Project not found." });
     res.json({ ok: true });
   } catch (err) {
@@ -498,10 +687,12 @@ app.delete("/api/projects/:id", requireAuth, csrfProtection, async (req, res, ne
 app.get("/api/projects/:id/leads", requireAuth, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = await loadUserProject(id, req.user.id);
-  if (!project) return res.status(404).json({ error: "Project not found." });
+  const authorized = await loadAuthorizedProject(req.user, id);
+  if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
   try {
-    res.json(await refreshProjectLeads(req.user, project));
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    res.json(await refreshProjectLeads(connection, authorized.value));
   } catch (err) {
     sendGoogleError(res, "Unable to fetch leads", err);
   }
@@ -510,11 +701,19 @@ app.get("/api/projects/:id/leads", requireAuth, async (req, res) => {
 app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtection, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = await loadUserProject(id, req.user.id);
-  if (!project) return res.status(404).json({ error: "Project not found." });
+  const authorized = await loadAuthorizedProject(req.user, id);
+  if (authorized.error) return res.status(authorized.statusCode).json({ error: authorized.error });
+
+  // Only Lead Status is accepted; reject attempts to supply other column payloads.
+  if (req.body && Object.keys(req.body).some(key => key !== "status")) {
+    return res.status(403).json({ error: "Not authorized." });
+  }
 
   try {
-    const client = googleClientForUser(req.user);
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    const client = googleClientForConnection(connection);
+    const project = authorized.value;
     const sheetData = await readSheet(client, project.spreadsheet_id, project.sheet_title);
     const planned = planLeadStatusUpdate({
       project,
@@ -530,21 +729,23 @@ app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtecti
       ok: true,
       rowNumber,
       status,
-      project: await refreshProjectLeads(req.user, project)
+      project: await refreshProjectLeads(connection, project)
     });
   } catch (err) {
     sendGoogleError(res, "Unable to update lead status", err);
   }
 });
 
-app.post("/api/projects/:id/lead-status-column", requireAuth, csrfProtection, async (req, res) => {
+app.post("/api/projects/:id/lead-status-column", requireAdmin, csrfProtection, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = await loadUserProject(id, req.user.id);
+  const project = await loadProjectById(id);
   if (!project) return res.status(404).json({ error: "Project not found." });
 
   try {
-    const client = googleClientForUser(req.user);
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    const client = googleClientForConnection(connection);
     const sheetData = await readSheet(client, project.spreadsheet_id, project.sheet_title);
     const planned = planLeadStatusColumnCreate({ project, sheetData });
     if (planned.error) return res.status(planned.statusCode).json({ error: planned.error });
@@ -553,25 +754,27 @@ app.post("/api/projects/:id/lead-status-column", requireAuth, csrfProtection, as
     await createLeadStatusColumn(client, spreadsheetId, sheetTitle, columnIndex, rowNumbers, defaultStatus);
     res.status(201).json({
       ok: true,
-      project: await refreshProjectLeads(req.user, project)
+      project: await refreshProjectLeads(connection, project)
     });
   } catch (err) {
     sendGoogleError(res, "Unable to add Lead Status column", err);
   }
 });
 
-/* -------------------- SYNC -------------------- */
+/* -------------------- SYNC (admin) -------------------- */
 
-app.post("/api/projects/:id/sync", requireAuth, csrfProtection, async (req, res) => {
+app.post("/api/projects/:id/sync", requireAdmin, csrfProtection, async (req, res) => {
   const id = positiveId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid project id." });
-  const project = await loadUserProject(id, req.user.id);
+  const project = await loadProjectById(id);
   if (!project) return res.status(404).json({ error: "Project not found." });
   if (!projectSyncGuard.tryBegin(id)) {
     return res.status(409).json({ error: "Sync already in progress for this project." });
   }
   try {
-    const result = await syncUserProject(req.user, project);
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    const result = await syncProject(connection, project);
     res.json({ ok: true, ...result });
   } catch (err) {
     sendSyncError(res, "Unable to sync project", err);
@@ -580,9 +783,11 @@ app.post("/api/projects/:id/sync", requireAuth, csrfProtection, async (req, res)
   }
 });
 
-app.post("/api/sync", requireAuth, csrfProtection, async (req, res) => {
+app.post("/api/sync", requireAdmin, csrfProtection, async (req, res) => {
   try {
-    const projects = await db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY name COLLATE NOCASE").all(req.user.id);
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+    const projects = await db.prepare("SELECT * FROM projects ORDER BY name COLLATE NOCASE").all();
     const updated = [];
     for (const project of projects) {
       if (!projectSyncGuard.tryBegin(project.id)) {
@@ -590,7 +795,7 @@ app.post("/api/sync", requireAuth, csrfProtection, async (req, res) => {
         continue;
       }
       try {
-        const result = await syncUserProject(req.user, project);
+        const result = await syncProject(connection, project);
         updated.push({
           id: project.id,
           name: project.name,
@@ -631,6 +836,10 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 
 async function start() {
   await db.ready;
+  await bootstrapAdminUser(db, {
+    loginId: ADMIN_LOGIN_ID,
+    passwordHash: ADMIN_PASSWORD_HASH
+  });
   if (require.main === module) {
     app.listen(PORT, () => console.log(`Lead Admin running at ${BASE_URL}`));
   }

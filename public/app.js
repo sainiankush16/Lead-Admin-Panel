@@ -7,12 +7,16 @@
     dashboard: ["Dashboard", "All projects overview"],
     projects: ["Projects", "Manage connected projects"],
     connections: ["Google Sheets", "Manage Google Sheet connections"],
+    users: ["Users", "Manage project users and assignments"],
     allLeads: ["All Leads", "Leads from all projects"]
   };
 
   let csrfToken = null;
   let user = null;
   let projects = [];
+  let users = [];
+  let googleConnected = false;
+  let googleEmail = null;
   const leadsCache = Object.create(null);
   let currentProjectId = null;
   let syncing = false;
@@ -21,7 +25,8 @@
   let selectedTab = null;
   let toastTimer = null;
   let uiBound = false;
-  let googleLoginStarted = false;
+  let loginSubmitStarted = false;
+  let googleConnectStarted = false;
 
   const $ = id => document.getElementById(id);
 
@@ -44,8 +49,18 @@
       : "Not refreshed yet";
   }
 
+  function isAdmin() {
+    return user?.role === "admin";
+  }
+
+  function roleLabel(role) {
+    if (role === "admin") return "Admin";
+    if (role === "project_user") return "Project User";
+    return role || "User";
+  }
+
   function greetingName() {
-    const name = user?.name?.trim() || user?.email?.split("@")[0] || "Admin";
+    const name = user?.name?.trim() || user?.loginId || "User";
     const hour = new Date().getHours();
     const period = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
     return `${period}, ${name}`;
@@ -126,6 +141,18 @@
     toastTimer = setTimeout(() => toast.classList.remove("show"), 3200);
   }
 
+  function setLoginError(message) {
+    const el = $("loginError");
+    if (!el) return;
+    if (!message) {
+      el.textContent = "";
+      el.classList.add("hidden");
+      return;
+    }
+    el.textContent = message;
+    el.classList.remove("hidden");
+  }
+
   function toggleSidebar() {
     $("sidebar").classList.toggle("open");
   }
@@ -134,15 +161,44 @@
     $("sidebar").classList.remove("open");
   }
 
+  function applyRoleUI() {
+    const admin = isAdmin();
+    document.querySelectorAll("[data-admin-only]").forEach(el => {
+      el.classList.toggle("hidden", !admin);
+    });
+  }
+
   function setUserUI() {
-    const initials = projectInitials(user?.name || user?.email || "A");
+    const initials = projectInitials(user?.name || user?.loginId || "A");
     $("userAvatar").textContent = initials;
-    $("userName").textContent = user?.name?.trim() || "Admin";
-    $("userEmail").textContent = user?.email || "";
-    $("oauthSignedInText").textContent = user?.email
-      ? `Signed in as ${user.email}. Select a spreadsheet and tab below to connect a project.`
-      : "Your Google account is authorized for this app. Select a spreadsheet and tab below.";
+    $("userName").textContent = user?.name?.trim() || "User";
+    const loginId = user?.loginId || "";
+    const role = roleLabel(user?.role);
+    $("userEmail").textContent = loginId ? `${loginId} · ${role}` : role;
     $("dashboardGreeting").textContent = greetingName();
+    updateGoogleConnectionStatus();
+    applyRoleUI();
+  }
+
+  function updateGoogleConnectionStatus() {
+    const status = $("googleConnectionStatus");
+    const signedInText = $("oauthSignedInText");
+    if (!status) return;
+    if (googleConnected) {
+      status.textContent = googleEmail
+        ? `Connected as ${googleEmail}`
+        : "Google Sheets is connected.";
+      if (signedInText) {
+        signedInText.textContent = googleEmail
+          ? `Sheets access authorized for ${googleEmail}. Reauthorize if access was revoked or scopes change.`
+          : "Sheets access is authorized. Select a spreadsheet and tab below to connect a project.";
+      }
+    } else {
+      status.textContent = "Google Sheets is not connected.";
+      if (signedInText) {
+        signedInText.textContent = "Connect a Google account to list spreadsheets and sync leads. Admin login is required.";
+      }
+    }
   }
 
   function latestSyncText() {
@@ -153,7 +209,14 @@
   }
 
   function updateSyncText() {
-    $("syncText").textContent = latestSyncText();
+    const el = $("syncText");
+    if (el) el.textContent = latestSyncText();
+  }
+
+  function emptyProjectsMessage() {
+    return isAdmin()
+      ? "No projects connected yet."
+      : "No projects have been assigned to your account yet.";
   }
 
   function collectAllLeads() {
@@ -253,7 +316,7 @@
     const container = $(containerId);
     if (!container) return;
     if (!projects.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">▣</div><p>No projects connected yet.</p></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="empty-state-icon">▣</div><p>${escapeHTML(emptyProjectsMessage())}</p></div>`;
       return;
     }
     container.innerHTML = projects.map(renderProjectCard).join("");
@@ -274,7 +337,7 @@
 
     const perf = $("performanceContainer");
     if (!projects.length) {
-      perf.innerHTML = '<div class="empty-state"><p>No projects yet.</p></div>';
+      perf.innerHTML = `<div class="empty-state"><p>${escapeHTML(emptyProjectsMessage())}</p></div>`;
     } else {
       perf.innerHTML = projects.map(project => {
         const cached = leadsCache[project.id];
@@ -333,7 +396,7 @@
     }
 
     const hasCol = Boolean(col);
-    $("addStatusColumnBtn").classList.toggle("hidden", hasCol);
+    $("addStatusColumnBtn").classList.toggle("hidden", hasCol || !isAdmin());
     $("statusColumnWarning").classList.toggle("hidden", hasCol);
   }
 
@@ -580,15 +643,205 @@
         </div>
         <div style="display:flex;gap:10px;align-items:center;">
           <span class="connected">● Connected</span>
-          <button class="btn btn-danger" type="button" data-action="remove-project" data-project-id="${project.id}">Remove</button>
+          <button class="btn btn-danger" type="button" data-action="remove-project" data-project-id="${project.id}" data-admin-only>Remove</button>
         </div>
       </div>
     `).join("");
+    applyRoleUI();
+  }
+
+  function renderProjectCheckboxes(containerId, selectedIds = []) {
+    const container = $(containerId);
+    if (!container) return;
+    const selected = new Set((selectedIds || []).map(Number));
+    if (!projects.length) {
+      container.innerHTML = '<span style="color:#6b7280;font-size:13px;">No projects available yet.</span>';
+      return;
+    }
+    container.innerHTML = projects.map(project => `
+      <label>
+        <input type="checkbox" value="${project.id}" ${selected.has(Number(project.id)) ? "checked" : ""}>
+        <span>${escapeHTML(project.name)}</span>
+      </label>
+    `).join("");
+  }
+
+  function selectedCheckboxIds(containerId) {
+    const container = $(containerId);
+    if (!container) return [];
+    return [...container.querySelectorAll('input[type="checkbox"]:checked')]
+      .map(input => Number(input.value))
+      .filter(id => Number.isSafeInteger(id) && id > 0);
+  }
+
+  function renderUsers() {
+    const body = $("usersTableBody");
+    if (!body) return;
+    renderProjectCheckboxes("newUserProjects");
+
+    if (!users.length) {
+      body.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:#6b7280;">No project users yet.</td></tr>`;
+      return;
+    }
+
+    body.replaceChildren();
+    users.forEach(item => {
+      const row = document.createElement("tr");
+      row.dataset.userId = String(item.id);
+
+      const assignedIds = (item.projects || []).map(p => p.id);
+      const projectLabels = (item.projects || []).map(p => p.name).join(", ") || "None";
+
+      row.innerHTML = `
+        <td><strong>${escapeHTML(item.name)}</strong></td>
+        <td>${escapeHTML(item.loginId)}</td>
+        <td><span class="status-pill ${item.isActive ? "active" : "inactive"}">${item.isActive ? "Active" : "Inactive"}</span></td>
+        <td>
+          <div style="margin-bottom:8px;font-size:12px;color:#6b7280;">${escapeHTML(projectLabels)}</div>
+          <div class="checkbox-list" data-user-projects="${item.id}"></div>
+        </td>
+        <td>
+          <div class="users-actions">
+            <button class="btn btn-light" type="button" data-action="toggle-user" data-user-id="${item.id}" data-active="${item.isActive ? "1" : "0"}">
+              ${item.isActive ? "Deactivate" : "Activate"}
+            </button>
+            <button class="btn btn-light" type="button" data-action="reset-password" data-user-id="${item.id}">Reset Password</button>
+            <button class="btn btn-primary" type="button" data-action="save-user-projects" data-user-id="${item.id}">Save Projects</button>
+          </div>
+        </td>
+      `;
+      body.appendChild(row);
+
+      const checkboxHost = row.querySelector(`[data-user-projects="${item.id}"]`);
+      if (checkboxHost) {
+        if (!projects.length) {
+          checkboxHost.innerHTML = '<span style="color:#6b7280;font-size:12px;">No projects yet.</span>';
+        } else {
+          const selected = new Set(assignedIds.map(Number));
+          checkboxHost.innerHTML = projects.map(project => `
+            <label>
+              <input type="checkbox" value="${project.id}" ${selected.has(Number(project.id)) ? "checked" : ""}>
+              <span>${escapeHTML(project.name)}</span>
+            </label>
+          `).join("");
+        }
+      }
+    });
+  }
+
+  async function loadUsers() {
+    const result = await api("/api/users");
+    users = result.users || [];
+  }
+
+  async function createUser() {
+    const name = $("newUserName").value.trim();
+    const loginId = $("newUserLoginId").value.trim();
+    const password = $("newUserPassword").value;
+    const projectIds = selectedCheckboxIds("newUserProjects");
+    const btn = $("createUserBtn");
+
+    if (!name || !loginId || !password) {
+      showToast("Name, Login ID, and password are required.");
+      return;
+    }
+
+    btn.disabled = true;
+    showLoading("Creating user...");
+    try {
+      await api("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, loginId, password, projectIds })
+      });
+      $("newUserName").value = "";
+      $("newUserLoginId").value = "";
+      $("newUserPassword").value = "";
+      await loadUsers();
+      renderUsers();
+      showToast("User created.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+      btn.disabled = false;
+    }
+  }
+
+  async function toggleActive(userId, currentlyActive) {
+    showLoading(currentlyActive ? "Deactivating user..." : "Activating user...");
+    try {
+      const result = await api(`/api/users/${userId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !currentlyActive })
+      });
+      users = result.users || users;
+      renderUsers();
+      showToast(currentlyActive ? "User deactivated." : "User activated.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function resetPassword(userId) {
+    const password = window.prompt("Enter a new password (8–128 characters):");
+    if (password == null) return;
+    if (!password) {
+      showToast("Password is required.");
+      return;
+    }
+    showLoading("Resetting password...");
+    try {
+      await api(`/api/users/${userId}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+      showToast("Password reset.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function assignProjects(userId, projectIds) {
+    showLoading("Saving project assignments...");
+    try {
+      const result = await api(`/api/users/${userId}/projects`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectIds })
+      });
+      users = result.users || users;
+      renderUsers();
+      showToast("Project assignments saved.");
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function loadGoogleStatus() {
+    if (!isAdmin()) return;
+    try {
+      const status = await api("/api/google/status");
+      googleConnected = Boolean(status.connected);
+      googleEmail = status.email || null;
+      updateGoogleConnectionStatus();
+    } catch {
+      updateGoogleConnectionStatus();
+    }
   }
 
   async function loadSpreadsheets() {
     const select = $("spreadsheetSelect");
     const tabSelect = $("sheetSelect");
+    if (!select || !tabSelect) return;
     select.innerHTML = '<option value="">Loading spreadsheets...</option>';
     tabSelect.innerHTML = '<option value="">Select spreadsheet first</option>';
     tabSelect.disabled = true;
@@ -696,13 +949,14 @@
 
   function setSyncButtonsDisabled(disabled) {
     syncing = disabled;
-    $("syncAllBtn").disabled = disabled;
+    const syncAll = $("syncAllBtn");
+    if (syncAll) syncAll.disabled = disabled;
     const detailSync = $("detailSyncBtn");
     if (detailSync) detailSync.disabled = disabled;
   }
 
   async function syncAllSheets() {
-    if (syncing) return;
+    if (syncing || !isAdmin()) return;
     setSyncButtonsDisabled(true);
     showLoading("Syncing all Google Sheets...");
     try {
@@ -721,7 +975,7 @@
   }
 
   async function syncCurrentProject() {
-    if (!currentProjectId || syncing) return;
+    if (!currentProjectId || syncing || !isAdmin()) return;
     setSyncButtonsDisabled(true);
     $("detailRefreshBtn").disabled = true;
     showLoading("Syncing project...");
@@ -768,7 +1022,7 @@
   }
 
   async function addLeadStatusColumn() {
-    if (!currentProjectId) return;
+    if (!currentProjectId || !isAdmin()) return;
     const btn = $("addStatusColumnBtn");
     btn.disabled = true;
     showLoading("Adding Lead Status column...");
@@ -808,6 +1062,11 @@
   }
 
   function showView(viewName, element) {
+    if (!isAdmin() && (viewName === "connections" || viewName === "users")) {
+      showView("dashboard");
+      return;
+    }
+
     if (viewName !== "projectDetail") currentProjectId = null;
 
     document.querySelectorAll(".view").forEach(view => view.classList.remove("active"));
@@ -831,7 +1090,13 @@
     if (viewName === "projects") renderProjectsGrid("allProjects");
     if (viewName === "connections") {
       renderConnections();
+      loadGoogleStatus();
       loadSpreadsheets();
+    }
+    if (viewName === "users") {
+      loadUsers()
+        .then(() => renderUsers())
+        .catch(err => showToast(err.message));
     }
     if (viewName === "allLeads") renderAllLeads();
     closeSidebar();
@@ -849,6 +1114,7 @@
   }
 
   async function saveProjectConnection() {
+    if (!isAdmin()) return;
     const name = $("projectNameInput").value.trim();
     if (!name) {
       showToast("Please enter a project name.");
@@ -895,6 +1161,7 @@
   }
 
   async function removeProject(id) {
+    if (!isAdmin()) return;
     if (!confirm("Remove this project connection? The Google Sheet will not be deleted.")) return;
     showLoading("Removing project...");
     try {
@@ -912,12 +1179,49 @@
     }
   }
 
-  function googleLogin() {
-    // Once-guard: double-clicks can fire two navigations before unload and
-    // overwrite oauthState / rotate the session cookie mid-login.
-    if (googleLoginStarted) return;
-    googleLoginStarted = true;
-    const btn = $("googleLoginBtn");
+  async function passwordLogin() {
+    if (loginSubmitStarted) return;
+    loginSubmitStarted = true;
+    const btn = $("loginSubmitBtn");
+    if (btn) btn.disabled = true;
+    setLoginError("");
+
+    const loginId = $("loginIdInput").value.trim();
+    const password = $("loginPasswordInput").value;
+
+    if (!loginId || !password) {
+      setLoginError("Enter your Login ID and password.");
+      loginSubmitStarted = false;
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    showLoading("Signing in...");
+    try {
+      await api("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loginId, password })
+      });
+      $("loginPasswordInput").value = "";
+      const auth = await api("/api/auth/me");
+      if (!auth.authenticated) throw new Error("Login succeeded but session was not established.");
+      await enterApp(auth);
+    } catch (err) {
+      setLoginError(err.message);
+      showToast(err.message);
+      loginSubmitStarted = false;
+      if (btn) btn.disabled = false;
+    } finally {
+      hideLoading();
+    }
+  }
+
+  function googleConnect() {
+    if (!isAdmin()) return;
+    if (googleConnectStarted) return;
+    googleConnectStarted = true;
+    const btn = $("googleConnectBtn");
     if (btn) btn.disabled = true;
     location.assign("/api/auth/google?returnTo=/");
   }
@@ -931,6 +1235,21 @@
     location.assign("/");
   }
 
+  async function enterApp(auth) {
+    user = auth.user;
+    googleConnected = Boolean(auth.googleConnected);
+    googleEmail = auth.googleEmail || null;
+    ({ csrfToken } = await api("/api/csrf"));
+    await getProjects();
+    setUserUI();
+
+    $("loginScreen").style.display = "none";
+    $("app").style.display = "block";
+
+    await warmLeadsCache();
+    loadDashboard();
+  }
+
   function bindUi() {
     if (uiBound) return;
     uiBound = true;
@@ -940,7 +1259,24 @@
       if (node) node.addEventListener(event, handler);
     };
 
-    on("googleLoginBtn", "click", googleLogin);
+    on("loginSubmitBtn", "click", () => { passwordLogin(); });
+    on("loginForm", "submit", event => {
+      event.preventDefault();
+      passwordLogin();
+    });
+    on("loginIdInput", "keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        passwordLogin();
+      }
+    });
+    on("loginPasswordInput", "keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        passwordLogin();
+      }
+    });
+    on("googleConnectBtn", "click", googleConnect);
     on("mobileMenuBtn", "click", toggleSidebar);
     on("syncAllBtn", "click", () => { syncAllSheets(); });
     on("addProjectFromDashboardBtn", "click", () => showView("connections"));
@@ -958,6 +1294,7 @@
     on("saveProjectBtn", "click", () => { saveProjectConnection(); });
     on("spreadsheetSelect", "change", onSpreadsheetChange);
     on("sheetSelect", "change", onTabChange);
+    on("createUserBtn", "click", () => { createUser(); });
 
     document.querySelectorAll(".nav-item[data-action='nav']").forEach(item => {
       item.addEventListener("click", () => showView(item.dataset.view, item));
@@ -991,6 +1328,32 @@
       if (removeBtn) {
         const id = Number(removeBtn.dataset.projectId);
         if (id) removeProject(id);
+        return;
+      }
+      const toggleBtn = event.target.closest("[data-action='toggle-user']");
+      if (toggleBtn) {
+        const id = Number(toggleBtn.dataset.userId);
+        const active = toggleBtn.dataset.active === "1";
+        if (id) toggleActive(id, active);
+        return;
+      }
+      const resetBtn = event.target.closest("[data-action='reset-password']");
+      if (resetBtn) {
+        const id = Number(resetBtn.dataset.userId);
+        if (id) resetPassword(id);
+        return;
+      }
+      const saveProjectsBtn = event.target.closest("[data-action='save-user-projects']");
+      if (saveProjectsBtn) {
+        const id = Number(saveProjectsBtn.dataset.userId);
+        if (!id) return;
+        const host = document.querySelector(`[data-user-projects="${id}"]`);
+        const projectIds = host
+          ? [...host.querySelectorAll('input[type="checkbox"]:checked')]
+            .map(input => Number(input.value))
+            .filter(value => Number.isSafeInteger(value) && value > 0)
+          : [];
+        assignProjects(id, projectIds);
       }
     });
 
@@ -1008,17 +1371,7 @@
     try {
       const auth = await api("/api/auth/me");
       if (!auth.authenticated) return;
-
-      user = auth.user;
-      ({ csrfToken } = await api("/api/csrf"));
-      await getProjects();
-      setUserUI();
-
-      $("loginScreen").style.display = "none";
-      $("app").style.display = "block";
-
-      await warmLeadsCache();
-      loadDashboard();
+      await enterApp(auth);
     } catch (err) {
       showToast(err.message);
     }
