@@ -13,6 +13,7 @@ import {
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LeadFollowUpSection } from "@/components/LeadFollowUpSection";
 import { LeadRemarksSection } from "@/components/LeadRemarksSection";
 import { LeadTimelineSection } from "@/components/LeadTimelineSection";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
@@ -21,6 +22,15 @@ import { useAuth } from "@/hooks/useAuth";
 import { api, ApiClientError } from "@/services/api";
 import type { Remark, TimelineEvent } from "@/types";
 import { buildLeadDetail, type LeadDetailModel } from "@/utils/leadDetail";
+import {
+  FOLLOW_UP_STATUS,
+  alreadyFollowUpMessage,
+  followUpRemarkSuccessMessage,
+  followUpSuccessMessage,
+  mapFollowUpRemarkError,
+  mapFollowUpStatusError,
+  shouldMarkFollowUp
+} from "@/utils/leadFollowUp";
 import {
   leadIdFromRowNumber,
   mapRemarkMutationError,
@@ -69,6 +79,10 @@ export default function LeadDetailScreen() {
   const [remarksError, setRemarksError] = useState<string | null>(null);
   const [remarkBusy, setRemarkBusy] = useState(false);
   const [remarkMutationError, setRemarkMutationError] = useState<string | null>(null);
+  const [followUpStatusMessage, setFollowUpStatusMessage] = useState<string | null>(null);
+  const [followUpStatusError, setFollowUpStatusError] = useState<string | null>(null);
+  const [followUpRemarkMessage, setFollowUpRemarkMessage] = useState<string | null>(null);
+  const [followUpRemarkError, setFollowUpRemarkError] = useState<string | null>(null);
 
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
@@ -153,6 +167,8 @@ export default function LeadDetailScreen() {
       syncSelectionFromDetail(result);
       setStatusError(null);
       setRemarkMutationError(null);
+      setFollowUpStatusError(null);
+      setFollowUpRemarkError(null);
       await Promise.all([loadRemarks(), loadTimeline()]);
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 401) {
@@ -202,35 +218,14 @@ export default function LeadDetailScreen() {
     const previousDetail = detail;
     try {
       const response = await api.updateLeadStatus(projectId, rowNumber, selectedStatus);
-
-      if (response.unchanged) {
+      const result = await applyStatusUpdateResult(previousDetail, selectedStatus, response);
+      if (result.unchanged) {
         setStatusMessage("No status change.");
-        syncSelectionFromDetail(previousDetail);
         return;
       }
-
-      const nextStatus = (response.status || selectedStatus) as LeadStatusValue;
-      if (response.project) {
-        const refreshed = buildLeadDetail(response.project, rowNumber);
-        if (refreshed.found) {
-          setDetail(refreshed);
-          syncSelectionFromDetail(refreshed);
-        } else {
-          const updated = applySuccessfulStatusUpdate(previousDetail, nextStatus);
-          if (updated) {
-            setDetail(updated);
-            syncSelectionFromDetail(updated);
-          }
-        }
-      } else {
-        const updated = applySuccessfulStatusUpdate(previousDetail, nextStatus);
-        if (updated) {
-          setDetail(updated);
-          syncSelectionFromDetail(updated);
-        }
-      }
       setStatusMessage("Lead Status updated.");
-      void loadTimeline();
+      setFollowUpStatusMessage(null);
+      setFollowUpStatusError(null);
     } catch (err) {
       const mapped = mapStatusUpdateError(err instanceof ApiClientError || err instanceof TypeError ? err : null);
       setStatusError(mapped.message);
@@ -244,10 +239,88 @@ export default function LeadDetailScreen() {
     }
   }
 
+  async function applyStatusUpdateResult(
+    previousDetail: LeadDetailModel,
+    selected: LeadStatusValue,
+    response: {
+      unchanged?: boolean;
+      status?: string;
+      project?: Parameters<typeof buildLeadDetail>[0];
+    }
+  ) {
+    if (response.unchanged) {
+      syncSelectionFromDetail(previousDetail);
+      return { unchanged: true as const };
+    }
+
+    const nextStatus = (response.status || selected) as LeadStatusValue;
+    if (response.project) {
+      const refreshed = buildLeadDetail(response.project, rowNumber);
+      if (refreshed.found) {
+        setDetail(refreshed);
+        syncSelectionFromDetail(refreshed);
+      } else {
+        const updated = applySuccessfulStatusUpdate(previousDetail, nextStatus);
+        if (updated) {
+          setDetail(updated);
+          syncSelectionFromDetail(updated);
+        }
+      }
+    } else {
+      const updated = applySuccessfulStatusUpdate(previousDetail, nextStatus);
+      if (updated) {
+        setDetail(updated);
+        syncSelectionFromDetail(updated);
+      }
+    }
+    void loadTimeline();
+    return { unchanged: false as const };
+  }
+
+  async function onMarkFollowUp() {
+    if (!detail || savingStatus) return;
+
+    if (!shouldMarkFollowUp(detail.status)) {
+      setFollowUpStatusMessage(alreadyFollowUpMessage());
+      setFollowUpStatusError(null);
+      return;
+    }
+
+    setSavingStatus(true);
+    setFollowUpStatusMessage(null);
+    setFollowUpStatusError(null);
+    setStatusMessage(null);
+    setStatusError(null);
+
+    const previousDetail = detail;
+    try {
+      const response = await api.updateLeadStatus(projectId, rowNumber, FOLLOW_UP_STATUS);
+      const result = await applyStatusUpdateResult(previousDetail, FOLLOW_UP_STATUS, response);
+      if (result.unchanged) {
+        setFollowUpStatusMessage(alreadyFollowUpMessage());
+        return;
+      }
+      setFollowUpStatusMessage(followUpSuccessMessage());
+      setStatusMessage("Lead Status updated.");
+    } catch (err) {
+      const mapped = mapFollowUpStatusError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null
+      );
+      setFollowUpStatusError(mapped.message);
+      setDetail(previousDetail);
+      syncSelectionFromDetail(previousDetail);
+      if (mapped.clearAuth) setError(mapped.message);
+      throw err;
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+
   async function onAddRemark(body: string) {
     if (!leadId || remarkBusy) return;
     setRemarkBusy(true);
     setRemarkMutationError(null);
+    setFollowUpRemarkError(null);
     try {
       const response = await api.addRemark(projectId, leadId, body);
       if (Array.isArray(response.remarks)) {
@@ -262,6 +335,33 @@ export default function LeadDetailScreen() {
         "add"
       );
       setRemarkMutationError(mapped.message);
+      if (mapped.clearAuth) setError(mapped.message);
+      throw err;
+    } finally {
+      setRemarkBusy(false);
+    }
+  }
+
+  async function onAddFollowUpRemark(body: string) {
+    if (!leadId || remarkBusy) return;
+    setRemarkBusy(true);
+    setFollowUpRemarkMessage(null);
+    setFollowUpRemarkError(null);
+    setRemarkMutationError(null);
+    try {
+      const response = await api.addRemark(projectId, leadId, body);
+      if (Array.isArray(response.remarks)) {
+        setRemarks(response.remarks);
+      } else if (response.remark) {
+        setRemarks(prev => [response.remark, ...prev.filter(item => item.id !== response.remark.id)]);
+      }
+      setFollowUpRemarkMessage(followUpRemarkSuccessMessage());
+      void loadTimeline();
+    } catch (err) {
+      const mapped = mapFollowUpRemarkError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null
+      );
+      setFollowUpRemarkError(mapped.message);
       if (mapped.clearAuth) setError(mapped.message);
       throw err;
     } finally {
@@ -479,6 +579,21 @@ export default function LeadDetailScreen() {
               {statusMessage ? <Text style={styles.statusSuccess}>{statusMessage}</Text> : null}
               {statusError ? <Text style={styles.statusFail}>{statusError}</Text> : null}
             </View>
+
+            <LeadFollowUpSection
+              displayStatus={detail.status}
+              statusSaving={savingStatus}
+              remarkBusy={remarkBusy}
+              statusMessage={followUpStatusMessage}
+              statusError={followUpStatusError}
+              remarkMessage={followUpRemarkMessage}
+              remarkError={followUpRemarkError}
+              onMarkFollowUp={onMarkFollowUp}
+              onAddFollowUpRemark={onAddFollowUpRemark}
+              onRetryStatus={() => {
+                void onMarkFollowUp();
+              }}
+            />
 
             <Text style={styles.infoTitle}>Lead Information</Text>
             {detail.fields.length === 0 ? (
