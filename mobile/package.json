@@ -11,7 +11,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "node --test ../dashboard-summary.test.js ../lead-list.test.js ../lead-detail.test.js ../lead-status-edit.test.js ../lead-remarks-mobile.test.js ../lead-timeline-mobile.test.js ../lead-search-mobile.test.js ../lead-search-filters-mobile.test.js ../user-management-mobile.test.js ../project-management-mobile.test.js ../account-settings-mobile.test.js ../lead-follow-up-mobile.test.js ../lead-contact-activity-mobile.test.js ../dashboard-intelligence-mobile.test.js ../lead-workflow-mobile.test.js ../lead-list-continuity-mobile.test.js ../lead-bulk-status-mobile.test.js ../lead-bulk-result-mobile.test.js ../lead-productivity-mobile.test.js ../lead-intelligence-mobile.test.js ../pipeline-mobile.test.js"
+    "test": "node --test ../dashboard-summary.test.js ../lead-list.test.js ../lead-detail.test.js ../lead-status-edit.test.js ../lead-remarks-mobile.test.js ../lead-timeline-mobile.test.js ../lead-search-mobile.test.js ../lead-search-filters-mobile.test.js ../user-management-mobile.test.js ../project-management-mobile.test.js ../account-settings-mobile.test.js ../lead-follow-up-mobile.test.js ../lead-contact-activity-mobile.test.js ../dashboard-intelligence-mobile.test.js ../lead-workflow-mobile.test.js ../lead-list-continuity-mobile.test.js ../lead-bulk-status-mobile.test.js ../lead-bulk-result-mobile.test.js ../lead-productivity-mobile.test.js ../lead-intelligence-mobile.test.js ../pipeline-mobile.test.js ../action-center-mobile.test.js"
   },
   "dependencies": {
     "expo": "~57.0.20",

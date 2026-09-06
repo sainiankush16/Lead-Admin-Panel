@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -11,12 +11,18 @@ import {
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { ActionCenterSection } from "@/components/ActionCenterSection";
+import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
 import { BRAND_NAME } from "@/constants/branding";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiClientError } from "@/services/api";
 import { loadDashboardSummary } from "@/services/dashboard";
-import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
+import type { ProjectLeadsResponse } from "@/types";
+import {
+  getActionCenterSummary,
+  type ActionCenterItem
+} from "@/utils/actionCenter";
 import {
   ACTIONABLE_STATUSES,
   buildLeadListPath,
@@ -35,6 +41,8 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [projectLeads, setProjectLeads] = useState<ProjectLeadsResponse[]>([]);
+  const [actionFilter, setActionFilter] = useState("All");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,10 +53,10 @@ export default function DashboardScreen() {
     setError(null);
     try {
       const data = await loadDashboardSummary();
-      setSummary(data);
+      setSummary(data.summary);
+      setProjectLeads(Array.isArray(data.projectLeads) ? data.projectLeads : []);
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 401) {
-        // AuthProvider clears session and login screen will show expired message.
         setError("Your session has expired.");
       } else if (err instanceof TypeError) {
         setError("Please check your internet connection.");
@@ -57,7 +65,10 @@ export default function DashboardScreen() {
       } else {
         setError("Unable to load dashboard.");
       }
-      if (mode === "initial") setSummary(null);
+      if (mode === "initial") {
+        setSummary(null);
+        setProjectLeads([]);
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -67,6 +78,11 @@ export default function DashboardScreen() {
   useEffect(() => {
     void load("initial");
   }, [load]);
+
+  const actionCenter = useMemo(
+    () => getActionCenterSummary(projectLeads, { filter: actionFilter, limit: 5 }),
+    [projectLeads, actionFilter]
+  );
 
   const displayName = user?.name?.trim() || user?.loginId || "there";
 
@@ -85,6 +101,18 @@ export default function DashboardScreen() {
 
   function openPipelineStatus(status: string) {
     if (!summary) return;
+    const target = resolvePipelineLeadTarget(summary, status);
+    if (!target?.path) return;
+    router.push(target.path);
+  }
+
+  function openActionLead(item: ActionCenterItem) {
+    if (!item?.detailHref) return;
+    router.push(item.detailHref);
+  }
+
+  function openActionViewAll(status: string | null) {
+    if (!summary || !status) return;
     const target = resolvePipelineLeadTarget(summary, status);
     if (!target?.path) return;
     router.push(target.path);
@@ -153,6 +181,29 @@ export default function DashboardScreen() {
               <Text style={styles.totalValue}>{formatCount(summary.totalLeads)}</Text>
             </View>
 
+            {summary.hasLeads ? (
+              <PipelineSummaryCard
+                title="Sales Pipeline"
+                counts={{
+                  statuses: summary.statuses,
+                  unknownStatusCount: summary.unknownStatusCount
+                }}
+                onSelectStatus={openPipelineStatus}
+                showAttention
+                showHealth
+              />
+            ) : null}
+
+            {summary.hasLeads ? (
+              <ActionCenterSection
+                summary={actionCenter}
+                filter={actionFilter}
+                onFilterChange={setActionFilter}
+                onOpenLead={openActionLead}
+                onViewAll={openActionViewAll}
+              />
+            ) : null}
+
             <Text style={styles.sectionTitle}>Actionable Leads</Text>
             <View style={styles.actionableGrid}>
               {ACTIONABLE_STATUSES.map(status => {
@@ -172,19 +223,6 @@ export default function DashboardScreen() {
                 );
               })}
             </View>
-
-            {summary.hasLeads ? (
-              <PipelineSummaryCard
-                title="Sales Pipeline"
-                counts={{
-                  statuses: summary.statuses,
-                  unknownStatusCount: summary.unknownStatusCount
-                }}
-                onSelectStatus={openPipelineStatus}
-                showAttention
-                showHealth
-              />
-            ) : null}
 
             <Text style={styles.sectionTitle}>Projects</Text>
             {summary.projects.map(project => (

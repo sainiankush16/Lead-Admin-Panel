@@ -8,12 +8,20 @@ import {
 
 const PROJECT_FETCH_CONCURRENCY = 4;
 
-export async function loadDashboardSummary(): Promise<DashboardSummary> {
+export interface DashboardLoadResult {
+  summary: DashboardSummary;
+  projectLeads: ProjectLeadsResponse[];
+}
+
+export async function loadDashboardSummary(): Promise<DashboardLoadResult> {
   const { projects } = await api.getProjects();
   const list: Project[] = Array.isArray(projects) ? projects : [];
 
   if (!list.length) {
-    return buildDashboardSummary([]);
+    return {
+      summary: buildDashboardSummary([]),
+      projectLeads: []
+    };
   }
 
   const projectLeads = await mapPool(
@@ -22,5 +30,8 @@ export async function loadDashboardSummary(): Promise<DashboardSummary> {
     async (project: Project): Promise<ProjectLeadsResponse> => api.getProjectLeads(project.id)
   );
 
-  return buildDashboardSummary(projectLeads);
+  return {
+    summary: buildDashboardSummary(projectLeads),
+    projectLeads
+  };
 }
