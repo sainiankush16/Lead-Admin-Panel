@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
+import { useMountedRef } from "@/hooks/useMountedRef";
 import { api, ApiClientError } from "@/services/api";
 import {
   canSubmitCreateProject,
@@ -34,6 +35,7 @@ type Step = "spreadsheet" | "sheet" | "name" | "review";
 export default function AddProjectScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const mountedRef = useMountedRef();
   const isAdmin = user?.role === "admin";
 
   const [step, setStep] = useState<Step>("spreadsheet");
@@ -69,6 +71,7 @@ export default function AddProjectScreen() {
     setError(null);
     try {
       const status = await api.getGoogleStatus();
+      if (!mountedRef.current) return;
       setGoogleConnected(Boolean(status.connected));
       setGoogleEmail(status.email || null);
       if (!status.connected) {
@@ -76,8 +79,10 @@ export default function AddProjectScreen() {
         return;
       }
       const sheets = await api.listSpreadsheets();
+      if (!mountedRef.current) return;
       setSpreadsheets(mapSpreadsheets(sheets));
     } catch (err) {
+      if (!mountedRef.current) return;
       const mapped = mapProjectManagementError(
         err instanceof ApiClientError || err instanceof TypeError ? err : null
       );
@@ -86,9 +91,9 @@ export default function AddProjectScreen() {
         // auth handler already clears session on 401 bearer
       }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, mountedRef]);
 
   useEffect(() => {
     void loadBootstrap();
@@ -101,15 +106,17 @@ export default function AddProjectScreen() {
     setSelectedTab(null);
     try {
       const response = await api.listSheetTabs(spreadsheet.id);
+      if (!mountedRef.current) return;
       setSheetTabs(mapSheetTabs(response));
       setStep("sheet");
     } catch (err) {
+      if (!mountedRef.current) return;
       const mapped = mapProjectManagementError(
         err instanceof ApiClientError || err instanceof TypeError ? err : null
       );
       setError(mapped.message);
     } finally {
-      setLoadingTabs(false);
+      if (mountedRef.current) setLoadingTabs(false);
     }
   }
 
@@ -129,14 +136,16 @@ export default function AddProjectScreen() {
     setError(null);
     try {
       const created = await api.createProject(validated.value);
+      if (!mountedRef.current) return;
       router.replace(`/projects/${created.project.id}`);
     } catch (err) {
+      if (!mountedRef.current) return;
       const mapped = mapProjectManagementError(
         err instanceof ApiClientError || err instanceof TypeError ? err : null
       );
       setError(mapped.message);
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }
 

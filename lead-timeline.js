@@ -147,21 +147,26 @@ async function recordStatusChangedEvent(db, {
   leadId,
   fromStatus,
   toStatus,
-  actor
+  actor,
+  mutationId = null
 }) {
   if (String(fromStatus || "") === String(toStatus || "")) {
     return { created: false, skipped: true };
+  }
+  const eventData = {
+    title: "Status Changed",
+    fromStatus,
+    toStatus,
+    actorLabel: actor?.name || actor?.login_id || "User"
+  };
+  if (mutationId) {
+    eventData.mutationId = String(mutationId);
   }
   const inserted = await insertTimelineEvent(db, {
     projectId,
     leadId,
     eventType: TIMELINE_EVENT_TYPES.STATUS_CHANGED,
-    eventData: {
-      title: "Status Changed",
-      fromStatus,
-      toStatus,
-      actorLabel: actor?.name || actor?.login_id || "User"
-    },
+    eventData,
     actorUserId: actor?.id ?? null,
     actorRole: actor?.role ?? null
   });

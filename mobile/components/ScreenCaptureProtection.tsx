@@ -22,6 +22,11 @@ type Props = {
  * Android: FLAG_SECURE via expo-screen-capture (screenshots, recording, recent-apps blank).
  * iOS: Expo secure-layer + capture overlay + app-switcher blur; JS lifecycle overlay as backup.
  * Does not request media permissions and does not log or upload capture events.
+ *
+ * Failure behavior (intentional fail-open for app availability):
+ * If the native ScreenCapture module throws (e.g. web/unsupported runtime), protection may not
+ * engage. The app continues to function. This is fail-open for availability, not fail-closed.
+ * Teardown errors are ignored so logout/unmount cannot crash the app.
  */
 export function ScreenCaptureProtection({ children, enabled = true }: Props) {
   const [lifecycleOverlayVisible, setLifecycleOverlayVisible] = useState(() =>
@@ -41,8 +46,14 @@ export function ScreenCaptureProtection({ children, enabled = true }: Props) {
         if (Platform.OS === "ios" && ScreenCapture.enableAppSwitcherProtectionAsync) {
           await ScreenCapture.enableAppSwitcherProtectionAsync(core.appSwitcherBlurIntensity());
         }
-      } catch {
-        // Native module may be unavailable on web/unsupported environments; fail closed quietly.
+      } catch (err) {
+        // Fail-open: keep CRM usable if native capture APIs are unavailable.
+        if (typeof __DEV__ !== "undefined" && __DEV__) {
+          console.warn(
+            "[Website CRM] Screen capture protection could not be enabled.",
+            err instanceof Error ? err.message : "unknown error"
+          );
+        }
       }
     })();
 

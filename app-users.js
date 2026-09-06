@@ -32,6 +32,34 @@ async function ensureAppUserSchema(db) {
   `);
 }
 
+function isDeletedOrInactiveBootstrapTarget(user) {
+  if (!user) return true;
+  if (!user.is_active) return true;
+  const loginId = String(user.login_id || "");
+  if (loginId.startsWith("deleted_")) return true;
+  return false;
+}
+
+async function findActiveBootstrapAdmin(db) {
+  return (
+    (await db
+      .prepare(
+        `SELECT * FROM app_users
+         WHERE role = ?
+           AND is_active = 1
+           AND login_id NOT LIKE 'deleted_%'
+         ORDER BY id ASC
+         LIMIT 1`
+      )
+      .get(ROLES.ADMIN)) || null
+  );
+}
+
+/**
+ * Bootstrap the configured env admin without reviving deleted/inactive admins.
+ * Credential rewrites bump session_version so existing sessions/tokens become invalid.
+ * Idempotent when login_id + password_hash already match an active admin.
+ */
 async function bootstrapAdminUser(db, { loginId, passwordHash }) {
   const login = validateLoginId(loginId);
   if (login.error) throw new Error(`ADMIN_LOGIN_ID is invalid: ${login.error}`);
@@ -44,22 +72,70 @@ async function bootstrapAdminUser(db, { loginId, passwordHash }) {
     if (existing.role !== ROLES.ADMIN) {
       throw new Error("ADMIN_LOGIN_ID collides with a non-admin app user.");
     }
-    await db.prepare(`UPDATE app_users
-      SET password_hash = ?, is_active = 1, role = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`).run(passwordHash, ROLES.ADMIN, existing.id);
+    if (isDeletedOrInactiveBootstrapTarget(existing)) {
+      throw new Error(
+        "ADMIN_LOGIN_ID matches an inactive or deleted admin account. Choose a different ADMIN_LOGIN_ID."
+      );
+    }
+
+    const hashChanged = String(existing.password_hash || "") !== String(passwordHash || "");
+    if (hashChanged) {
+      await db
+        .prepare(
+          `UPDATE app_users
+           SET password_hash = ?,
+               is_active = 1,
+               role = ?,
+               session_version = session_version + 1,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?
+             AND is_active = 1
+             AND login_id NOT LIKE 'deleted_%'`
+        )
+        .run(passwordHash, ROLES.ADMIN, existing.id);
+    } else {
+      await db
+        .prepare(
+          `UPDATE app_users
+           SET is_active = 1, role = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?
+             AND is_active = 1
+             AND login_id NOT LIKE 'deleted_%'`
+        )
+        .run(ROLES.ADMIN, existing.id);
+    }
     return existing.id;
   }
 
-  const namedAdmin = await db.prepare("SELECT * FROM app_users WHERE role = ? LIMIT 1").get(ROLES.ADMIN);
-  if (namedAdmin) {
-    await db.prepare(`UPDATE app_users
-      SET login_id = ?, password_hash = ?, is_active = 1, name = COALESCE(NULLIF(name, ''), 'Admin'), updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`).run(login.value, passwordHash, namedAdmin.id);
-    return namedAdmin.id;
+  const activeAdmin = await findActiveBootstrapAdmin(db);
+  if (activeAdmin) {
+    const loginChanged = String(activeAdmin.login_id || "") !== String(login.value);
+    const hashChanged = String(activeAdmin.password_hash || "") !== String(passwordHash || "");
+    if (loginChanged || hashChanged) {
+      await db
+        .prepare(
+          `UPDATE app_users
+           SET login_id = ?,
+               password_hash = ?,
+               is_active = 1,
+               name = COALESCE(NULLIF(name, ''), 'Admin'),
+               session_version = session_version + 1,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?
+             AND is_active = 1
+             AND login_id NOT LIKE 'deleted_%'`
+        )
+        .run(login.value, passwordHash, activeAdmin.id);
+    }
+    return activeAdmin.id;
   }
 
-  const result = await db.prepare(`INSERT INTO app_users (name, login_id, password_hash, role, is_active)
-    VALUES (?, ?, ?, ?, 1)`).run("Admin", login.value, passwordHash, ROLES.ADMIN);
+  const result = await db
+    .prepare(
+      `INSERT INTO app_users (name, login_id, password_hash, role, is_active)
+       VALUES (?, ?, ?, ?, 1)`
+    )
+    .run("Admin", login.value, passwordHash, ROLES.ADMIN);
   return Number(result.lastInsertRowid);
 }
 

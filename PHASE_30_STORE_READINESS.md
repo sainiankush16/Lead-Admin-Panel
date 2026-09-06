@@ -27,7 +27,7 @@ Known production public host (confirm before submission):
 | Icon | `mobile/assets/images/icon.png` (1024×1024) |
 | Splash | `mobile/assets/images/splash-icon.png` |
 | EAS config | `mobile/eas.json` (development / preview / production) |
-| EAS project link | **OWNER INPUT REQUIRED** (not linked in repo) |
+| EAS project link | **LINKED** — `@sainiankush16s-team/chaturx` (`371610cf-f7db-4582-a68f-bf5ae57741cd`) |
 | Expo Updates / OTA | Not configured (not required for first release) |
 
 Production EAS profile sets public env only:
@@ -200,9 +200,9 @@ Website CRM is a business lead-management tool for authorized organization users
 - Testing track + reviewer/app-access instructions
 
 ### Build / EAS
-- Expo/EAS account + project link (`eas init` / project ID)
-- Apple/Google credentials in EAS
-- Owner-run production builds
+- Expo/EAS account: **linked** — `@sainiankush16s-team/chaturx` (`371610cf-f7db-4582-a68f-bf5ae57741cd`)
+- Apple/Google credentials in EAS (signing) — OWNER ACTION REQUIRED
+- Owner-run production builds — later phase
 - Confirm target SDK / store requirements at build time
 
 ### Backend / Vercel (operator verify)

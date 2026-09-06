@@ -102,6 +102,7 @@ test("authenticated app layout wraps ScreenCaptureProtection; login does not", (
   assert.match(component, /disableAppSwitcherProtectionAsync/);
   assert.match(component, /AppState\.addEventListener/);
   assert.match(component, /sub\.remove\(\)/);
+  assert.match(component, /fail-open/i);
   assert.doesNotMatch(component, /READ_MEDIA_IMAGES|requestPermissionsAsync|addScreenshotListener/);
   assert.doesNotMatch(component, /analytics|telemetry|fetch\(|AsyncStorage/);
   assert.doesNotMatch(component, /CHATURX|ChaturX|Ankush CRM/);

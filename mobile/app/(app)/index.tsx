@@ -17,6 +17,7 @@ import { ProductivityOverviewCard } from "@/components/ProductivityOverviewCard"
 import { BRAND_NAME } from "@/constants/branding";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
+import { useMountedRef } from "@/hooks/useMountedRef";
 import { ApiClientError } from "@/services/api";
 import { loadDashboardSummary } from "@/services/dashboard";
 import type { ProjectLeadsResponse } from "@/types";
@@ -42,6 +43,7 @@ function formatCount(value: number): string {
 export default function DashboardScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const mountedRef = useMountedRef();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [projectLeads, setProjectLeads] = useState<ProjectLeadsResponse[]>([]);
   const [actionFilter, setActionFilter] = useState("All");
@@ -55,9 +57,11 @@ export default function DashboardScreen() {
     setError(null);
     try {
       const data = await loadDashboardSummary();
+      if (!mountedRef.current) return;
       setSummary(data.summary);
       setProjectLeads(Array.isArray(data.projectLeads) ? data.projectLeads : []);
     } catch (err) {
+      if (!mountedRef.current) return;
       if (err instanceof ApiClientError && err.status === 401) {
         setError("Your session has expired.");
       } else if (err instanceof TypeError) {
@@ -72,10 +76,12 @@ export default function DashboardScreen() {
         setProjectLeads([]);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
     void load("initial");

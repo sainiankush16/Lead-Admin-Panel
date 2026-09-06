@@ -58,6 +58,7 @@ const {
   lookupMobileSessionToken,
   deleteMobileSessionToken,
   deleteMobileSessionTokensForSid,
+  deleteMobileSessionTokensForUser,
   defaultMobileTokenExpiry,
   sessionStoreGet,
   sessionStoreDestroy
@@ -70,7 +71,6 @@ const {
   TIMELINE_EVENT_TYPES,
   leadIdFromRowNumber,
   recordLeadGeneratedForRows,
-  recordStatusChangedEvent,
   listTimelineEvents,
   getTimelineEvent,
   adminEditTimelineEvent,
@@ -92,6 +92,23 @@ const {
   disconnectGoogleAuthorization,
   googleDisconnectResponseBody
 } = require("./google-disconnect");
+const {
+  ensureLoginThrottleSchema,
+  clientIpFromRequest,
+  assertLoginAllowed,
+  recordLoginFailure,
+  clearLoginThrottleOnSuccess,
+  GENERIC_AUTH_ERROR
+} = require("./login-throttle");
+const {
+  ensureStatusTimelineOutboxSchema,
+  flushPendingStatusTimelineForLead,
+  recordStatusChangedAfterSheetWrite
+} = require("./status-timeline-outbox");
+const {
+  ensureStatusUpdateLockSchema,
+  withLeadStatusLock
+} = require("./status-update-lock");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -498,8 +515,20 @@ function sendGoogleError(res, context, err) {
 
 app.post("/api/auth/login", async (req, res, next) => {
   try {
-    const result = await authenticateAppUser(db, req.body?.loginId, req.body?.password);
-    if (!result.ok) return res.status(401).json({ error: result.error });
+    const ip = clientIpFromRequest(req);
+    const loginId = req.body?.loginId;
+    const allowed = await assertLoginAllowed(db, { ip, loginId });
+    if (!allowed.ok) {
+      return res.status(allowed.statusCode).json({ error: allowed.error });
+    }
+
+    const result = await authenticateAppUser(db, loginId, req.body?.password);
+    if (!result.ok) {
+      await recordLoginFailure(db, { ip, loginId });
+      return res.status(401).json({ error: GENERIC_AUTH_ERROR });
+    }
+
+    await clearLoginThrottleOnSuccess(db, { ip, loginId });
     await establishAppSession(req, result.user);
     res.json({ user: sanitizeAppUser(result.user) });
   } catch (err) {
@@ -626,7 +655,7 @@ app.get("/api/auth/me", async (req, res, next) => {
       authenticated: true,
       user: sanitizeAppUser(user),
       googleConnected: Boolean(google?.refresh_token_enc),
-      googleEmail: google?.email || null
+      googleEmail: user.role === ROLES.ADMIN ? google?.email || null : null
     });
   } catch (err) {
     next(err);
@@ -649,9 +678,20 @@ app.post("/api/auth/logout", requireAuth, csrfProtection, (req, res, next) => {
 
 app.post("/api/mobile/auth/login", async (req, res, next) => {
   try {
-    const result = await authenticateAppUser(db, req.body?.loginId, req.body?.password);
-    if (!result.ok) return res.status(401).json({ error: result.error });
+    const ip = clientIpFromRequest(req);
+    const loginId = req.body?.loginId;
+    const allowed = await assertLoginAllowed(db, { ip, loginId });
+    if (!allowed.ok) {
+      return res.status(allowed.statusCode).json({ error: allowed.error });
+    }
 
+    const result = await authenticateAppUser(db, loginId, req.body?.password);
+    if (!result.ok) {
+      await recordLoginFailure(db, { ip, loginId });
+      return res.status(401).json({ error: GENERIC_AUTH_ERROR });
+    }
+
+    await clearLoginThrottleOnSuccess(db, { ip, loginId });
     await establishAppSession(req, result.user);
     const expiresAt = defaultMobileTokenExpiry();
     const issued = await issueMobileSessionToken(db, {
@@ -841,6 +881,7 @@ app.patch("/api/users/:id/status", requireAdmin, csrfProtection, async (req, res
     const isActive = Boolean(req.body?.isActive);
     const result = await setUserActive(db, id, isActive);
     if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    await deleteMobileSessionTokensForUser(db, id);
     res.json({ ok: true, users: await listAppUsers(db) });
   } catch (err) {
     next(err);
@@ -853,6 +894,7 @@ app.post("/api/users/:id/reset-password", requireAdmin, csrfProtection, async (r
     if (!id) return res.status(400).json({ error: "Invalid user id." });
     const result = await resetUserPassword(db, id, req.body?.password);
     if (result.error) return res.status(result.statusCode).json({ error: result.error });
+    await deleteMobileSessionTokensForUser(db, id);
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -1000,70 +1042,81 @@ app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtecti
     return res.status(403).json({ error: "Not authorized." });
   }
 
+  const rowNumberParam = req.params.rowNumber;
+  const lockRowNumber = positiveId(rowNumberParam) || Number(rowNumberParam);
+
   try {
-    const connection = await requireGoogleConnection(req, res);
-    if (!connection) return;
-    const client = googleClientForConnection(connection);
-    const project = authorized.value;
-    const sheetData = await readSheet(client, project.spreadsheet_id, project.sheet_title);
-    const planned = planLeadStatusUpdate({
-      project,
-      sheetData,
-      rowNumber: req.params.rowNumber,
-      status: req.body?.status
-    });
-    if (planned.error) return res.status(planned.statusCode).json({ error: planned.error });
-
-    const decision = decideLeadStatusWrite({ sheetData, plannedValue: planned.value });
-    const { rowNumber, status } = decision;
-
-    // Same status: no Google Sheets write and no STATUS_CHANGED timeline event.
-    if (decision.unchanged) {
-      return res.json({
-        ok: true,
-        unchanged: true,
-        rowNumber,
-        status,
-        project: await refreshProjectLeads(connection, project)
+    await withLeadStatusLock(db, id, lockRowNumber, async () => {
+      const connection = await requireGoogleConnection(req, res);
+      if (!connection) return;
+      const client = googleClientForConnection(connection);
+      const project = authorized.value;
+      const sheetData = await readSheet(client, project.spreadsheet_id, project.sheet_title);
+      const planned = planLeadStatusUpdate({
+        project,
+        sheetData,
+        rowNumber: rowNumberParam,
+        status: req.body?.status
       });
-    }
+      if (planned.error) {
+        res.status(planned.statusCode).json({ error: planned.error });
+        return;
+      }
 
-    const { spreadsheetId, sheetTitle, columnIndex } = decision.write;
-    const previousStatus = decision.previousStatus;
+      const decision = decideLeadStatusWrite({ sheetData, plannedValue: planned.value });
+      const { rowNumber, status } = decision;
+      const leadId = leadIdFromRowNumber(rowNumber);
 
-    // Write to Google Sheets first. Timeline only after a successful write.
-    await writeLeadStatus(client, spreadsheetId, sheetTitle, columnIndex, rowNumber, status);
+      // Recover any durable pending STATUS_CHANGED events before same-status short-circuit.
+      if (leadId) {
+        await flushPendingStatusTimelineForLead(db, project.id, leadId);
+      }
 
-    const leadId = leadIdFromRowNumber(rowNumber);
-    if (leadId) {
-      try {
-        await recordStatusChangedEvent(db, {
+      // Same status: no Google Sheets write and no new STATUS_CHANGED timeline event.
+      if (decision.unchanged) {
+        res.json({
+          ok: true,
+          unchanged: true,
+          rowNumber,
+          status,
+          project: await refreshProjectLeads(connection, project)
+        });
+        return;
+      }
+
+      const { spreadsheetId, sheetTitle, columnIndex } = decision.write;
+      const previousStatus = decision.previousStatus;
+
+      // Write to Google Sheets first. Timeline only after a successful write.
+      await writeLeadStatus(client, spreadsheetId, sheetTitle, columnIndex, rowNumber, status);
+
+      let timelinePending = false;
+      if (leadId) {
+        const timelineResult = await recordStatusChangedAfterSheetWrite(db, {
           projectId: project.id,
           leadId,
           fromStatus: previousStatus,
           toStatus: status,
           actor: req.user
         });
-      } catch (timelineErr) {
-        // Sheets already updated — do not invent a false event or roll back Sheets.
-        console.error("STATUS_CHANGED timeline insert failed after Sheets write:", timelineErr?.message || timelineErr);
-        return res.status(500).json({
-          error: "Unable to record status change history.",
-          rowNumber,
-          status
-        });
+        timelinePending = Boolean(timelineResult.timelinePending);
       }
-    }
 
-    res.json({
-      ok: true,
-      success: true,
-      rowNumber,
-      status,
-      project: await refreshProjectLeads(connection, project)
+      res.json({
+        ok: true,
+        success: true,
+        sheetUpdated: true,
+        timelinePending,
+        rowNumber,
+        status,
+        project: await refreshProjectLeads(connection, project)
+      });
     });
   } catch (err) {
-    // Google write failed (or earlier) — no STATUS_CHANGED event was created.
+    if (err?.statusCode === 409) {
+      return res.status(409).json({ error: err.message || "Lead status update is busy. Please try again." });
+    }
+    // Google write failed (or earlier) — no STATUS_CHANGED event was created for this attempt.
     sendGoogleError(res, "Unable to update lead status", err);
   }
 });
@@ -1350,6 +1403,9 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 async function start() {
   await db.ready;
   await ensureMobileSessionTokenSchema(db);
+  await ensureLoginThrottleSchema(db);
+  await ensureStatusTimelineOutboxSchema(db);
+  await ensureStatusUpdateLockSchema(db);
   await bootstrapAdminUser(db, {
     loginId: ADMIN_LOGIN_ID,
     passwordHash: ADMIN_PASSWORD_HASH

@@ -13,12 +13,14 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
+import { useMountedRef } from "@/hooks/useMountedRef";
 import { api, ApiClientError } from "@/services/api";
 import type { Project } from "@/types";
 
 export default function ProjectsScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const mountedRef = useMountedRef();
   const isAdmin = user?.role === "admin";
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -37,8 +39,10 @@ export default function ProjectsScreen() {
     setError(null);
     try {
       const result = await api.getProjects();
+      if (!mountedRef.current) return;
       setProjects(Array.isArray(result.projects) ? result.projects : []);
     } catch (err) {
+      if (!mountedRef.current) return;
       if (err instanceof ApiClientError && err.status === 401) {
         setError("Your session has expired.");
       } else if (err instanceof TypeError) {
@@ -48,10 +52,12 @@ export default function ProjectsScreen() {
       }
       if (mode === "initial") setProjects([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
     void load("initial");

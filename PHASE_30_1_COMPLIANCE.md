@@ -225,7 +225,7 @@ Uncertain console wording: **OWNER INPUT REQUIRED**
 - Confirm production public domain
 - Enter Privacy + Delete Account URLs in store consoles
 - Complete Apple App Privacy + Play Data Safety forms
-- EAS project link / signing / store accounts
+- EAS signing / store accounts (project already linked: `@sainiankush16s-team/chaturx`)
 - Reviewer credentials
 
 ## 13. Blockers

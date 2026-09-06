@@ -67,17 +67,21 @@ test("status PATCH route reuses requireAuth + csrfProtection and writes Sheets b
   assert.match(source, /app\.patch\("\/api\/projects\/:id\/leads\/:rowNumber\/status", requireAuth, csrfProtection/);
   assert.match(source, /decideLeadStatusWrite/);
   assert.match(source, /await writeLeadStatus/);
-  assert.match(source, /recordStatusChangedEvent/);
+  assert.match(source, /recordStatusChangedAfterSheetWrite/);
+  assert.match(source, /withLeadStatusLock/);
+  assert.match(source, /flushPendingStatusTimelineForLead/);
 
   const patchStart = source.indexOf('app.patch("/api/projects/:id/leads/:rowNumber/status"');
   const patchEnd = source.indexOf("/* -------------------- LEAD REMARKS + TIMELINE -------------------- */", patchStart);
   const route = source.slice(patchStart, patchEnd);
   const writeIdx = route.indexOf("await writeLeadStatus");
-  const timelineIdx = route.indexOf("recordStatusChangedEvent");
+  const timelineIdx = route.indexOf("recordStatusChangedAfterSheetWrite");
   assert.ok(writeIdx > 0);
   assert.ok(timelineIdx > writeIdx);
   assert.match(route, /decision\.unchanged/);
-  assert.match(route, /Unable to record status change history/);
+  assert.match(route, /sheetUpdated:\s*true/);
+  assert.match(route, /timelinePending/);
+  assert.doesNotMatch(route, /Unable to record status change history/);
 });
 
 test("mobile bearer CSRF bypass remains gated; browser CSRF still requires token match", () => {

@@ -43,6 +43,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "371610cf-f7db-4582-a68f-bf5ae57741cd"
+      }
+    },
+    "owner": "sainiankush16s-team"
   }
 }

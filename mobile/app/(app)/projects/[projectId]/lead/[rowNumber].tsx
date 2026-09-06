@@ -27,6 +27,7 @@ import { LeadWorkThisLead } from "@/components/LeadWorkThisLead";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
+import { useMountedRef } from "@/hooks/useMountedRef";
 import { api, ApiClientError } from "@/services/api";
 import type { Remark, TimelineEvent } from "@/types";
 import {
@@ -70,6 +71,7 @@ function FieldRow({ label, value }: { label: string; value: string }) {
 export default function LeadDetailScreen() {
   const router = useRouter();
   const { user } = useAuth();
+  const mountedRef = useMountedRef();
   const params = useLocalSearchParams<{ projectId: string; rowNumber: string }>();
   const projectId = Number(params.projectId);
   const rowNumber = Number(params.rowNumber);
@@ -141,8 +143,10 @@ export default function LeadDetailScreen() {
     setRemarksError(null);
     try {
       const response = await api.getRemarks(projectId, leadId);
+      if (!mountedRef.current) return;
       setRemarks(Array.isArray(response.remarks) ? response.remarks : []);
     } catch (err) {
+      if (!mountedRef.current) return;
       const mapped = mapRemarksLoadError(
         err instanceof ApiClientError || err instanceof TypeError ? err : null
       );
@@ -151,9 +155,9 @@ export default function LeadDetailScreen() {
         setError(mapped.message);
       }
     } finally {
-      setRemarksLoading(false);
+      if (mountedRef.current) setRemarksLoading(false);
     }
-  }, [leadId, projectId]);
+  }, [leadId, projectId, mountedRef]);
 
   const loadTimeline = useCallback(async () => {
     if (!leadId || !Number.isSafeInteger(projectId) || projectId <= 0) {
@@ -165,8 +169,10 @@ export default function LeadDetailScreen() {
     setTimelineError(null);
     try {
       const response = await api.getLeadTimeline(projectId, leadId);
+      if (!mountedRef.current) return;
       setTimelineEvents(Array.isArray(response.events) ? response.events : []);
     } catch (err) {
+      if (!mountedRef.current) return;
       const mapped = mapTimelineLoadError(
         err instanceof ApiClientError || err instanceof TypeError ? err : null
       );
@@ -175,9 +181,9 @@ export default function LeadDetailScreen() {
         setError(mapped.message);
       }
     } finally {
-      setTimelineLoading(false);
+      if (mountedRef.current) setTimelineLoading(false);
     }
-  }, [leadId, projectId]);
+  }, [leadId, projectId, mountedRef]);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (!Number.isSafeInteger(projectId) || projectId <= 0 || !leadId) {
@@ -194,6 +200,7 @@ export default function LeadDetailScreen() {
 
     try {
       const projectData = await api.getProjectLeads(projectId);
+      if (!mountedRef.current) return;
       const result = buildLeadDetail(projectData, rowNumber);
       if (!result.found) {
         setDetail(null);
@@ -211,6 +218,7 @@ export default function LeadDetailScreen() {
       setContactRemarkError(null);
       await Promise.all([loadRemarks(), loadTimeline()]);
     } catch (err) {
+      if (!mountedRef.current) return;
       if (err instanceof ApiClientError && err.status === 401) {
         setError("Session expired. Please login again.");
       } else if (err instanceof ApiClientError && err.status === 403) {
@@ -225,10 +233,12 @@ export default function LeadDetailScreen() {
       }
       if (mode === "initial") setDetail(null);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [projectId, rowNumber, leadId, syncSelectionFromDetail, loadRemarks, loadTimeline]);
+  }, [projectId, rowNumber, leadId, syncSelectionFromDetail, loadRemarks, loadTimeline, mountedRef]);
 
   useEffect(() => {
     void load("initial");

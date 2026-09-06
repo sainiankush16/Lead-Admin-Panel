@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BRAND_NAME, BRAND_TAGLINE } from "@/constants/branding";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
+import { useMountedRef } from "@/hooks/useMountedRef";
 import { getLegalBaseUrl } from "@/lib/config";
 import { api, ApiClientError } from "@/services/api";
 import {
@@ -23,7 +24,8 @@ import {
   logoutConfirmationCopy,
   mapAccountInfo,
   mapAppInfo,
-  mapDeleteAccountError
+  mapDeleteAccountError,
+  afterSuccessfulServerAccountDeletion
 } from "@/utils/accountSettings";
 import { openExternalUrl } from "@/utils/linking";
 
@@ -42,6 +44,7 @@ function resolveBuildNumber() {
 
 export default function MoreScreen() {
   const { user, logout, status } = useAuth();
+  const mountedRef = useMountedRef();
   const [busy, setBusy] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -81,7 +84,7 @@ export default function MoreScreen() {
     try {
       await logout();
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   }
 
@@ -105,18 +108,24 @@ export default function MoreScreen() {
     setDeleting(true);
     try {
       await api.deleteAccount();
-      Alert.alert(
-        "Account deleted",
-        "Your Website CRM account has been permanently deleted."
-      );
-      // Clears SecureStore and auth state. Server sessions are already invalidated.
-      await logout();
+      // Server delete succeeded → local credentials MUST clear even if this screen unmounted.
+      await afterSuccessfulServerAccountDeletion({
+        clearLocalCredentials: () => logout(),
+        isMounted: () => mountedRef.current,
+        onSuccessUi: () => {
+          Alert.alert(
+            "Account deleted",
+            "Your Website CRM account has been permanently deleted."
+          );
+        }
+      });
     } catch (err) {
+      if (!mountedRef.current) return;
       const statusCode = err instanceof ApiClientError ? err.status : 0;
       const serverMessage = err instanceof ApiClientError ? err.message : undefined;
       Alert.alert("Unable to delete account", mapDeleteAccountError(statusCode, serverMessage));
     } finally {
-      setDeleting(false);
+      if (mountedRef.current) setDeleting(false);
     }
   }
 

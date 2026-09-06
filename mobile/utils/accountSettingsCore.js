@@ -114,6 +114,29 @@ function mapDeleteAccountError(status, fallbackMessage) {
   return "Unable to delete account. Please try again.";
 }
 
+/**
+ * After server account deletion succeeds, ALWAYS clear local credentials.
+ * UI callbacks run only when the caller reports still mounted.
+ */
+async function afterSuccessfulServerAccountDeletion({
+  clearLocalCredentials,
+  isMounted,
+  onSuccessUi
+}) {
+  if (typeof clearLocalCredentials !== "function") {
+    throw new Error("clearLocalCredentials is required after account deletion.");
+  }
+  await clearLocalCredentials();
+  const mounted = typeof isMounted === "function" ? Boolean(isMounted()) : true;
+  if (!mounted) {
+    return { credentialsCleared: true, uiShown: false };
+  }
+  if (typeof onSuccessUi === "function") {
+    await onSuccessUi();
+  }
+  return { credentialsCleared: true, uiShown: true };
+}
+
 module.exports = {
   displayRoleLabel,
   displayAccountStatus,
@@ -124,5 +147,6 @@ module.exports = {
   accountViewContainsSensitiveFields,
   logoutConfirmationCopy,
   deleteAccountConfirmationCopy,
-  mapDeleteAccountError
+  mapDeleteAccountError,
+  afterSuccessfulServerAccountDeletion
 };

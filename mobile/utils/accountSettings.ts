@@ -34,6 +34,11 @@ const core = require("./accountSettingsCore.js") as {
     confirmToken: string;
   };
   mapDeleteAccountError: (status: number | null | undefined, fallbackMessage?: string) => string;
+  afterSuccessfulServerAccountDeletion: (input: {
+    clearLocalCredentials: () => void | Promise<void>;
+    isMounted?: () => boolean;
+    onSuccessUi?: () => void | Promise<void>;
+  }) => Promise<{ credentialsCleared: true; uiShown: boolean }>;
 };
 
 export interface AccountInfoView {
@@ -61,3 +66,4 @@ export const accountViewContainsSensitiveFields = core.accountViewContainsSensit
 export const logoutConfirmationCopy = core.logoutConfirmationCopy;
 export const deleteAccountConfirmationCopy = core.deleteAccountConfirmationCopy;
 export const mapDeleteAccountError = core.mapDeleteAccountError;
+export const afterSuccessfulServerAccountDeletion = core.afterSuccessfulServerAccountDeletion;

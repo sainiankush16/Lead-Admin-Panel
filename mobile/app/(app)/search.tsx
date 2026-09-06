@@ -16,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LeadSearchResultCard } from "@/components/LeadSearchResultCard";
 import { LEAD_STATUSES } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
+import { useMountedRef } from "@/hooks/useMountedRef";
 import { api, ApiClientError } from "@/services/api";
 import type { Project } from "@/types";
 import {
@@ -41,6 +42,7 @@ const STATUS_FILTERS = [ALL_STATUSES, ...LEAD_STATUSES, "Unknown"] as const;
 
 export default function SearchScreen() {
   const router = useRouter();
+  const mountedRef = useMountedRef();
   const [state, setState] = useState<SearchUiState>(createInitialSearchState());
   const [localValidation, setLocalValidation] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -52,9 +54,11 @@ export default function SearchScreen() {
   const loadProjects = useCallback(async () => {
     try {
       const response = await api.getProjects();
+      if (!mountedRef.current) return;
       setProjects(Array.isArray(response.projects) ? response.projects : []);
       setProjectsError(null);
     } catch (err) {
+      if (!mountedRef.current) return;
       if (err instanceof ApiClientError && err.status === 401) {
         setProjectsError("Session expired. Please login again.");
       } else {
@@ -62,7 +66,7 @@ export default function SearchScreen() {
       }
       setProjects([]);
     }
-  }, []);
+  }, [mountedRef]);
 
   useEffect(() => {
     void loadProjects();
@@ -87,8 +91,10 @@ export default function SearchScreen() {
 
     try {
       const response = await api.searchLeads(validated.value);
+      if (!mountedRef.current) return;
       setState(prev => applySuccessfulSearch(prev, response, validated.value));
     } catch (err) {
+      if (!mountedRef.current) return;
       const mapped = mapSearchError(err instanceof ApiClientError || err instanceof TypeError ? err : null);
       setState(prev => ({
         ...prev,
