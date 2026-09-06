@@ -45,6 +45,7 @@ const {
 const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-data");
 const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
 const { buildSyncSnapshot, compareSheetToSnapshot, syncInProgressGuard } = require("./sync-snapshot");
+const { searchAcrossAuthorizedProjects } = require("./lead-search");
 const {
   TIMELINE_EVENT_TYPES,
   leadIdFromRowNumber,
@@ -651,6 +652,42 @@ app.put("/api/users/:id/projects", requireAdmin, csrfProtection, async (req, res
     res.json({ ok: true, users: await listAppUsers(db) });
   } catch (err) {
     next(err);
+  }
+});
+
+/* -------------------- GLOBAL LEAD SEARCH -------------------- */
+
+app.get("/api/leads/search", requireAuth, async (req, res) => {
+  try {
+    const connection = await requireGoogleConnection(req, res);
+    if (!connection) return;
+
+    const projects = await listAuthorizedProjects(req.user);
+    const outcome = await searchAcrossAuthorizedProjects({
+      projects,
+      query: req.query.q,
+      loadSheet: async project => readSheet(
+        googleClientForConnection(connection),
+        project.spreadsheet_id,
+        project.sheet_title
+      )
+    });
+
+    if (outcome.error) {
+      return res.status(outcome.statusCode || 400).json({
+        error: outcome.error,
+        sheetErrors: outcome.sheetErrors || undefined
+      });
+    }
+
+    res.json({
+      query: outcome.query,
+      count: outcome.count,
+      results: outcome.results,
+      sheetErrors: outcome.sheetErrors.length ? outcome.sheetErrors : undefined
+    });
+  } catch (err) {
+    sendGoogleError(res, "Unable to search leads", err);
   }
 });
 

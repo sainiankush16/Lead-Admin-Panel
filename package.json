@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "lint": "node --check server.js && node --check db.js && node --check google.js && node --check sheet-data.js && node --check crypto.js && node --check session-store.js && node --check session-config.js && node --check oauth-diagnostics.js && node --check oauth-login-guard.js && node --check password.js && node --check authz.js && node --check app-users.js && node --check lead-timeline.js && node --check lead-remarks.js && node --check lead-status.js && node --check lead-status-ops.js && node --check api-guards.js && node --check sync-snapshot.js && node --check public/phone-helpers.js && node --check public/app.js",
+    "lint": "node --check server.js && node --check db.js && node --check google.js && node --check sheet-data.js && node --check crypto.js && node --check session-store.js && node --check session-config.js && node --check oauth-diagnostics.js && node --check oauth-login-guard.js && node --check password.js && node --check authz.js && node --check app-users.js && node --check lead-timeline.js && node --check lead-remarks.js && node --check lead-status.js && node --check lead-status-ops.js && node --check lead-search.js && node --check api-guards.js && node --check sync-snapshot.js && node --check public/phone-helpers.js && node --check public/app.js",
     "test": "node --test"
   },
   "engines": {

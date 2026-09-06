@@ -260,6 +260,94 @@
         .page-title span { color: var(--muted); font-size: 12px; }
         .top-actions { display: flex; align-items: center; gap: 12px; }
 
+        .global-search-desktop {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+        }
+
+        .global-search-desktop .global-search-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .global-search-desktop input {
+            width: min(280px, 32vw);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 9px 12px;
+            font-size: 13px;
+            background: #fff;
+        }
+
+        .global-search-results-panel {
+            position: fixed;
+            top: 72px;
+            right: 30px;
+            width: min(420px, calc(100vw - 60px));
+            max-height: min(70vh, 560px);
+            overflow: auto;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(15, 23, 42, 0.12);
+            z-index: 900;
+            padding: 16px;
+        }
+
+        .global-search-results-panel.hidden { display: none; }
+
+        .global-search-results-panel h3 {
+            margin: 0 0 4px;
+            font-size: 15px;
+        }
+
+        .global-search-meta {
+            color: var(--muted);
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .global-search-empty,
+        .global-search-error {
+            color: var(--muted);
+            font-size: 13px;
+            padding: 12px 0;
+        }
+
+        .global-search-error { color: #b91c1c; }
+
+        .global-search-card {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+
+        .global-search-card:last-child { margin-bottom: 0; }
+
+        .global-search-card strong.name {
+            display: block;
+            font-size: 15px;
+            margin-bottom: 6px;
+        }
+
+        .global-search-card .meta-line {
+            font-size: 12px;
+            color: #374151;
+            margin: 3px 0;
+        }
+
+        .global-search-card .btn {
+            margin-top: 10px;
+        }
+
         .sync-status {
             font-size: 12px;
             color: var(--muted);
@@ -986,6 +1074,8 @@
         @media (max-width: 767px) {
             .lead-desktop-table { display: none; }
             .lead-mobile-list { display: flex; }
+            .global-search-desktop,
+            .global-search-results-panel { display: none !important; }
 
             /* iOS Safari auto-zooms focused controls under 16px; keep desktop sizes unchanged. */
             input,
@@ -1093,6 +1183,11 @@
                 </div>
             </div>
             <div class="top-actions">
+                <div class="global-search-desktop" id="globalSearchDesktop">
+                    <label class="global-search-label" for="globalLeadSearchInput">Global Lead Search</label>
+                    <input type="search" id="globalLeadSearchInput" placeholder="🔍 Phone / Name / Email" maxlength="120" autocomplete="off">
+                    <button class="btn btn-primary" type="button" id="globalLeadSearchBtn">Search</button>
+                </div>
                 <div class="sync-status" data-admin-only>
                     <span class="sync-dot"></span>
                     <span id="syncText">Not synced yet</span>
@@ -1100,6 +1195,12 @@
                 <button class="btn btn-light" type="button" id="syncAllBtn" data-admin-only>↻ Sync</button>
             </div>
         </header>
+
+        <div class="global-search-results-panel hidden" id="globalSearchResultsPanel" aria-live="polite">
+            <h3>Search Results</h3>
+            <div class="global-search-meta" id="globalSearchMeta"></div>
+            <div id="globalSearchResultsBody"></div>
+        </div>
 
         <section class="content">
 

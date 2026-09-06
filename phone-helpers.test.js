@@ -5,7 +5,9 @@ const test = require("node:test");
 const {
   findNameColumn,
   findPhoneColumn,
+  findEmailColumn,
   normalizePhoneForLinks,
+  phonesMatchForSearch,
   buildTelHref,
   buildWhatsAppHref
 } = require("./public/phone-helpers");
@@ -48,6 +50,19 @@ test("missing or invalid phones disable link generation", () => {
   assert.equal(normalizePhoneForLinks("12345"), null);
   assert.equal(buildTelHref(null), null);
   assert.equal(buildWhatsAppHref(undefined), null);
+});
+
+test("email column detection accepts common header variations", () => {
+  assert.equal(findEmailColumn(["Name", "Email", "Phone"]), "Email");
+  assert.equal(findEmailColumn(["E-mail"]), "E-mail");
+  assert.equal(findEmailColumn(["Email Address"]), "Email Address");
+  assert.equal(findEmailColumn(["Name", "City"]), null);
+});
+
+test("phone search matching normalizes formatting without rewriting stored values", () => {
+  assert.equal(phonesMatchForSearch("9876543210", "+91-9876543210"), true);
+  assert.equal(phonesMatchForSearch("91 9876543210", "9876543210"), true);
+  assert.equal(phonesMatchForSearch("9876543210", "9111111111"), false);
 });
 
 test("mobile card field contract: name phone actions status order helpers", () => {

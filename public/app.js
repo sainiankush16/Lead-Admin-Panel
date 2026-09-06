@@ -743,6 +743,138 @@
     await refreshLeadDetailSideData();
   }
 
+  function closeGlobalSearchResults() {
+    const panel = $("globalSearchResultsPanel");
+    if (panel) panel.classList.add("hidden");
+  }
+
+  function renderGlobalSearchResults(payload) {
+    const panel = $("globalSearchResultsPanel");
+    const meta = $("globalSearchMeta");
+    const body = $("globalSearchResultsBody");
+    if (!panel || !meta || !body) return;
+
+    panel.classList.remove("hidden");
+    const count = Number(payload?.count || 0);
+    const results = Array.isArray(payload?.results) ? payload.results : [];
+    meta.textContent = count === 1 ? "1 match found" : `${count} matches found`;
+
+    body.replaceChildren();
+
+    if (payload?.error) {
+      const err = document.createElement("div");
+      err.className = "global-search-error";
+      err.textContent = payload.error;
+      body.appendChild(err);
+      return;
+    }
+
+    if (!results.length) {
+      const empty = document.createElement("div");
+      empty.className = "global-search-empty";
+      empty.textContent = "No results";
+      body.appendChild(empty);
+      return;
+    }
+
+    results.forEach(hit => {
+      const card = document.createElement("article");
+      card.className = "global-search-card";
+
+      const name = document.createElement("strong");
+      name.className = "name";
+      name.textContent = hit.name || "Unnamed lead";
+      card.appendChild(name);
+
+      if (hit.phone) {
+        const phone = document.createElement("div");
+        phone.className = "meta-line";
+        phone.textContent = `📞 ${hit.phone}`;
+        card.appendChild(phone);
+      }
+      const projectLine = document.createElement("div");
+      projectLine.className = "meta-line";
+      projectLine.textContent = `Project: ${hit.projectName || "—"}`;
+      card.appendChild(projectLine);
+
+      const sheetLine = document.createElement("div");
+      sheetLine.className = "meta-line";
+      sheetLine.textContent = `Sheet: ${hit.spreadsheetName || "—"}`;
+      card.appendChild(sheetLine);
+
+      const tabLine = document.createElement("div");
+      tabLine.className = "meta-line";
+      tabLine.textContent = `Tab: ${hit.sheetTitle || "—"}`;
+      card.appendChild(tabLine);
+
+      const statusLine = document.createElement("div");
+      statusLine.className = "meta-line";
+      statusLine.textContent = `Status: ${hit.status || "—"}`;
+      card.appendChild(statusLine);
+
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "btn btn-primary";
+      openBtn.textContent = "Open Lead";
+      openBtn.addEventListener("click", () => {
+        openLeadFromSearch(hit);
+      });
+      card.appendChild(openBtn);
+      body.appendChild(card);
+    });
+  }
+
+  async function runGlobalLeadSearch() {
+    const input = $("globalLeadSearchInput");
+    const btn = $("globalLeadSearchBtn");
+    const query = String(input?.value || "").trim();
+    if (!query) {
+      showToast("Enter a phone, name, or email to search.");
+      return;
+    }
+
+    if (btn) btn.disabled = true;
+    renderGlobalSearchResults({ count: 0, results: [], error: null });
+    $("globalSearchMeta").textContent = "Searching...";
+    $("globalSearchResultsBody").replaceChildren();
+    const searching = document.createElement("div");
+    searching.className = "global-search-empty";
+    searching.textContent = "Searching...";
+    $("globalSearchResultsBody").appendChild(searching);
+
+    try {
+      const data = await api(`/api/leads/search?q=${encodeURIComponent(query)}`);
+      renderGlobalSearchResults(data);
+      if (data.sheetErrors?.length) {
+        showToast("Some projects could not be searched.");
+      }
+    } catch (err) {
+      renderGlobalSearchResults({ count: 0, results: [], error: err.message || "Search failed." });
+      $("globalSearchMeta").textContent = "Error";
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function openLeadFromSearch(hit) {
+    if (!hit?.projectId || !hit?.rowNumber) return;
+    closeGlobalSearchResults();
+    showLoading("Opening lead...");
+    try {
+      await openProject(Number(hit.projectId));
+      // Ensure fresh sheet rows so Open Lead finds the row.
+      if (!leadsCache[hit.projectId]?.rowNumbers?.includes(Number(hit.rowNumber))) {
+        await fetchProjectLeads(Number(hit.projectId), { silent: true });
+        renderProjectDetail();
+      }
+      await openLeadDetail(Number(hit.rowNumber));
+    } catch (err) {
+      showToast(err.message || "Unable to open lead.");
+    } finally {
+      hideLoading();
+    }
+  }
+
   function renderLeadMobileCards(leads) {
     const cached = activeProject();
     const list = $("leadMobileList");
@@ -1680,7 +1812,10 @@
       });
     }
     document.addEventListener("keydown", event => {
-      if (event.key === "Escape") closeLeadDetail();
+      if (event.key === "Escape") {
+        closeLeadDetail();
+        closeGlobalSearchResults();
+      }
     });
     on("loginForm", "submit", event => {
       event.preventDefault();
@@ -1713,6 +1848,14 @@
     on("allLeadSearch", "input", filterAllLeads);
     on("allProjectFilter", "change", filterAllLeads);
     on("allStatusFilter", "change", filterAllLeads);
+    on("globalLeadSearchBtn", "click", () => { runGlobalLeadSearch(); });
+    on("globalLeadSearchInput", "keydown", event => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        runGlobalLeadSearch();
+      }
+      if (event.key === "Escape") closeGlobalSearchResults();
+    });
     on("saveProjectBtn", "click", () => { saveProjectConnection(); });
     on("spreadsheetSelect", "change", onSpreadsheetChange);
     on("sheetSelect", "change", onTabChange);
