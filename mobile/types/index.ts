@@ -142,5 +142,7 @@ export type {
 export type {
   BulkStatusOutcome,
   BulkStatusSummary,
-  BulkStatusProgress
+  BulkStatusProgress,
+  BulkResultKind,
+  BulkStatusResultView
 } from "@/utils/leadList";

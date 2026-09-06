@@ -58,12 +58,15 @@ export const leadListScrollRestorationStrategy = core.leadListScrollRestorationS
 
 export type BulkStatusOutcome = "updated" | "unchanged" | "failed";
 
+export type BulkResultKind = "empty" | "success" | "partial" | "failure";
+
 export interface BulkStatusSummary {
   total: number;
   updated: number;
   unchanged: number;
   failed: number;
   succeeded: number;
+  targetStatus?: string | null;
 }
 
 export interface BulkStatusProgress {
@@ -71,6 +74,21 @@ export interface BulkStatusProgress {
   total: number;
   rowNumber: number;
   outcome: BulkStatusOutcome;
+}
+
+export interface BulkStatusResultView {
+  kind: BulkResultKind;
+  total: number;
+  updated: number;
+  unchanged: number;
+  failed: number;
+  succeeded: number;
+  targetStatus: string;
+  title: string;
+  headline: string;
+  details: string[];
+  retryHint: string | null;
+  accessibilityLabel: string;
 }
 
 export const BULK_STATUS_CONCURRENCY = core.BULK_STATUS_CONCURRENCY as number;
@@ -116,12 +134,27 @@ export const emptyBulkStatusSummary = core.emptyBulkStatusSummary as (
 ) => BulkStatusSummary;
 
 export const aggregateBulkStatusResults = core.aggregateBulkStatusResults as (
-  outcomes: BulkStatusOutcome[]
+  outcomes: BulkStatusOutcome[],
+  targetStatus?: string | null
 ) => BulkStatusSummary;
+
+export const classifyBulkResultKind = core.classifyBulkResultKind as (
+  summary: Pick<BulkStatusSummary, "total" | "failed" | "succeeded" | "updated" | "unchanged">
+) => BulkResultKind;
+
+export const formatBulkStatusProgress = core.formatBulkStatusProgress as (options?: {
+  completed?: number;
+  total?: number;
+}) => string;
 
 export const formatBulkStatusResult = core.formatBulkStatusResult as (
   summary: BulkStatusSummary
 ) => string;
+
+export const buildBulkStatusResult = core.buildBulkStatusResult as (
+  summary: BulkStatusSummary,
+  targetStatus?: string | null
+) => BulkStatusResultView;
 
 export const runBulkLeadStatusUpdates = core.runBulkLeadStatusUpdates as (options: {
   projectId: number;

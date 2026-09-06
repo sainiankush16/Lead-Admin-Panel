@@ -213,11 +213,12 @@ function emptyBulkStatusSummary(total = 0) {
     updated: 0,
     unchanged: 0,
     failed: 0,
-    succeeded: 0
+    succeeded: 0,
+    targetStatus: null
   };
 }
 
-function aggregateBulkStatusResults(outcomes) {
+function aggregateBulkStatusResults(outcomes, targetStatus = null) {
   const list = Array.isArray(outcomes) ? outcomes : [];
   const summary = emptyBulkStatusSummary(list.length);
   for (const outcome of list) {
@@ -226,9 +227,36 @@ function aggregateBulkStatusResults(outcomes) {
     else summary.failed += 1;
   }
   summary.succeeded = summary.updated + summary.unchanged;
+  const label = String(targetStatus || "").trim();
+  summary.targetStatus = label || null;
   return summary;
 }
 
+function classifyBulkResultKind(summary) {
+  const total = Number(summary?.total) || 0;
+  const failed = Number(summary?.failed) || 0;
+  const updated = Number(summary?.updated) || 0;
+  const unchanged = Number(summary?.unchanged) || 0;
+  const succeeded =
+    Number.isFinite(Number(summary?.succeeded)) && summary?.succeeded != null
+      ? Number(summary.succeeded)
+      : updated + unchanged;
+  if (total <= 0) return "empty";
+  if (failed <= 0) return "success";
+  if (succeeded <= 0) return "failure";
+  return "partial";
+}
+
+function formatBulkStatusProgress({ completed, total } = {}) {
+  const done = Number(completed);
+  const all = Number(total);
+  if (!Number.isFinite(done) || !Number.isFinite(all) || all <= 0) {
+    return "Updating leads...";
+  }
+  return `Updating ${Math.max(0, done)} of ${all}...`;
+}
+
+/** Phase 21-compatible one-line summary (no target required). */
 function formatBulkStatusResult(summary) {
   const total = Number(summary?.total) || 0;
   const succeeded = Number(summary?.succeeded) || 0;
@@ -250,6 +278,83 @@ function formatBulkStatusResult(summary) {
     return `0 of ${total} leads updated.`;
   }
   return `${succeeded} of ${total} leads updated. ${failed} failed.`;
+}
+
+function buildBulkStatusResult(summary, targetStatus) {
+  const total = Number(summary?.total) || 0;
+  const updated = Number(summary?.updated) || 0;
+  const unchanged = Number(summary?.unchanged) || 0;
+  const failed = Number(summary?.failed) || 0;
+  const succeeded =
+    Number.isFinite(Number(summary?.succeeded)) && summary?.succeeded != null
+      ? Number(summary.succeeded)
+      : updated + unchanged;
+  const target =
+    String(targetStatus || summary?.targetStatus || "").trim() || "status";
+  const kind = classifyBulkResultKind({
+    total,
+    updated,
+    unchanged,
+    failed,
+    succeeded
+  });
+
+  let headline = "No leads selected.";
+  const details = [];
+
+  if (kind === "success") {
+    if (updated > 0 && unchanged === 0) {
+      headline = `${updated} lead${updated === 1 ? "" : "s"} updated to ${target}`;
+    } else if (updated === 0 && unchanged > 0) {
+      headline = `${unchanged} lead${unchanged === 1 ? "" : "s"} were already ${target}`;
+    } else {
+      headline = `${total} lead${total === 1 ? "" : "s"} processed`;
+      details.push(`${updated} status change${updated === 1 ? "" : "s"}`);
+      details.push(`${unchanged} already ${target}`);
+    }
+  } else if (kind === "partial") {
+    headline = `${succeeded} of ${total} processed successfully`;
+    details.push(`${failed} failed`);
+    if (updated > 0) {
+      details.push(`${updated} status change${updated === 1 ? "" : "s"}`);
+    }
+    if (unchanged > 0) {
+      details.push(`${unchanged} already ${target}`);
+    }
+  } else if (kind === "failure") {
+    headline = `0 of ${total} updated`;
+    details.push(`${failed} failed`);
+  }
+
+  const retryHint =
+    failed > 0
+      ? "Failed leads can be selected again and retried manually."
+      : null;
+
+  const accessibilityLabel = [
+    "Bulk Status Result",
+    headline,
+    ...details,
+    `Target Status: ${target}`,
+    retryHint
+  ]
+    .filter(Boolean)
+    .join(". ");
+
+  return {
+    kind,
+    total,
+    updated,
+    unchanged,
+    failed,
+    succeeded,
+    targetStatus: target,
+    title: "Bulk Status Result",
+    headline,
+    details,
+    retryHint,
+    accessibilityLabel
+  };
 }
 
 async function runBulkLeadStatusUpdates({
@@ -282,7 +387,7 @@ async function runBulkLeadStatusUpdates({
       return "failed";
     }
   });
-  return aggregateBulkStatusResults(outcomes);
+  return aggregateBulkStatusResults(outcomes, status);
 }
 
 module.exports = {
@@ -310,6 +415,9 @@ module.exports = {
   classifyBulkStatusOutcome,
   emptyBulkStatusSummary,
   aggregateBulkStatusResults,
+  classifyBulkResultKind,
+  formatBulkStatusProgress,
   formatBulkStatusResult,
+  buildBulkStatusResult,
   runBulkLeadStatusUpdates
 };

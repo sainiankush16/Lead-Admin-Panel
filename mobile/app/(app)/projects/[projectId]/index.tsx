@@ -21,12 +21,13 @@ import { normalizeLeadListStatusParam } from "@/utils/dashboardSummary";
 import {
   areLeadListFiltersActive,
   BULK_STATUS_CONCURRENCY,
+  buildBulkStatusResult,
   buildLeadListItems,
   bulkStatusConfirmationCopy,
   canEnableBulkStatus,
   clearLeadSelection,
   filterLeadListItems,
-  formatBulkStatusResult,
+  formatBulkStatusProgress,
   formatLeadListCount,
   formatSelectionCount,
   leadListDetailHref,
@@ -35,6 +36,7 @@ import {
   selectedLeadCount,
   selectionKeyFromRowNumber,
   toggleLeadSelection,
+  type BulkStatusResultView,
   type LeadListItem
 } from "@/utils/leadList";
 
@@ -59,7 +61,7 @@ export default function ProjectLeadsScreen() {
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
-  const [bulkResult, setBulkResult] = useState<string | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkStatusResultView | null>(null);
   const skipNextFocusRefresh = useRef(true);
   const bulkInFlight = useRef(false);
   const mountedRef = useRef(true);
@@ -138,6 +140,8 @@ export default function ProjectLeadsScreen() {
       }
       return () => {
         exitSelectionMode();
+        setBulkResult(null);
+        setBulkProgress(null);
       };
     }, [load, exitSelectionMode])
   );
@@ -229,6 +233,10 @@ export default function ProjectLeadsScreen() {
     setBulkResult(null);
   }
 
+  function dismissBulkResult() {
+    setBulkResult(null);
+  }
+
   function onPullRefresh() {
     if (bulkInFlight.current || bulkBusy) return;
     exitSelectionMode();
@@ -243,7 +251,7 @@ export default function ProjectLeadsScreen() {
   }
 
   function chooseBulkStatus(target: LeadStatusValue) {
-    if (!bulkEnabled) return;
+    if (!bulkEnabled || bulkInFlight.current || bulkBusy) return;
     const copy = bulkStatusConfirmationCopy(selectedCount, target);
     Alert.alert(copy.title, copy.message, [
       { text: copy.cancel, style: "cancel" },
@@ -261,7 +269,7 @@ export default function ProjectLeadsScreen() {
     bulkInFlight.current = true;
     setBulkBusy(true);
     setStatusPickerOpen(false);
-    setBulkProgress(`Updating 0 of ${selectedCount}...`);
+    setBulkProgress(formatBulkStatusProgress({ completed: 0, total: selectedCount }));
     setBulkResult(null);
 
     const rowNumbers = [...selectedKeys]
@@ -277,12 +285,12 @@ export default function ProjectLeadsScreen() {
         updateLeadStatus: (pid, row, nextStatus) => api.updateLeadStatus(pid, row, nextStatus),
         onProgress: ({ completed, total }) => {
           if (!mountedRef.current) return;
-          setBulkProgress(`Updating ${completed} of ${total}...`);
+          setBulkProgress(formatBulkStatusProgress({ completed, total }));
         }
       });
 
       if (mountedRef.current) {
-        setBulkResult(formatBulkStatusResult(summary));
+        setBulkResult(buildBulkStatusResult(summary, target));
         exitSelectionMode();
       }
 
@@ -462,10 +470,46 @@ export default function ProjectLeadsScreen() {
             {bulkProgress}
           </Text>
         ) : null}
+
         {bulkResult ? (
-          <Text style={styles.bulkResult} accessibilityLabel={bulkResult}>
-            {bulkResult}
-          </Text>
+          <View
+            style={[
+              styles.resultCard,
+              bulkResult.kind === "failure" && styles.resultCardFailure,
+              bulkResult.kind === "partial" && styles.resultCardPartial,
+              bulkResult.kind === "success" && styles.resultCardSuccess
+            ]}
+            accessibilityRole="summary"
+            accessibilityLabel={bulkResult.accessibilityLabel}
+          >
+            <Text style={styles.resultTitle}>Bulk Status Result</Text>
+            <Text
+              style={[
+                styles.resultHeadline,
+                bulkResult.kind === "failure" && styles.resultHeadlineFailure
+              ]}
+            >
+              {bulkResult.headline}
+            </Text>
+            {bulkResult.details.map(line => (
+              <Text key={line} style={styles.resultDetail}>
+                {line}
+              </Text>
+            ))}
+            <Text style={styles.resultTargetLabel}>Target Status</Text>
+            <Text style={styles.resultTargetValue}>{bulkResult.targetStatus}</Text>
+            {bulkResult.retryHint ? (
+              <Text style={styles.resultRetryHint}>{bulkResult.retryHint}</Text>
+            ) : null}
+            <Pressable
+              style={styles.resultDismiss}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss bulk result"
+              onPress={dismissBulkResult}
+            >
+              <Text style={styles.resultDismissText}>Dismiss</Text>
+            </Pressable>
+          </View>
         ) : null}
       </View>
 
@@ -658,7 +702,74 @@ const styles = StyleSheet.create({
   },
   statusPickerTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
   bulkProgress: { marginTop: 10, color: colors.accent, fontWeight: "700", fontSize: 13 },
-  bulkResult: { marginTop: 10, color: colors.textSoft, fontSize: 13, lineHeight: 18 },
+  resultCard: {
+    marginTop: 12,
+    backgroundColor: colors.card,
+    borderColor: colors.cardBorder,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    gap: 6
+  },
+  resultCardSuccess: {
+    borderColor: colors.accent
+  },
+  resultCardPartial: {
+    borderColor: "#F59E0B"
+  },
+  resultCardFailure: {
+    borderColor: colors.danger
+  },
+  resultTitle: {
+    color: colors.text,
+    fontWeight: "800",
+    fontSize: 14
+  },
+  resultHeadline: {
+    color: colors.textSoft,
+    fontWeight: "700",
+    fontSize: 15,
+    lineHeight: 20
+  },
+  resultHeadlineFailure: {
+    color: colors.danger
+  },
+  resultDetail: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  resultTargetLabel: {
+    marginTop: 6,
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4
+  },
+  resultTargetValue: {
+    color: colors.text,
+    fontWeight: "800",
+    fontSize: 15
+  },
+  resultRetryHint: {
+    marginTop: 4,
+    color: colors.textSoft,
+    fontSize: 13,
+    lineHeight: 18
+  },
+  resultDismiss: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    minHeight: 40,
+    justifyContent: "center",
+    paddingHorizontal: 4
+  },
+  resultDismissText: {
+    color: colors.accent,
+    fontWeight: "800",
+    fontSize: 13
+  },
   list: { paddingHorizontal: 16, paddingBottom: 28 },
   center: { alignItems: "center", marginTop: 36, gap: 12, paddingHorizontal: 24 },
   centerText: { color: colors.textMuted, textAlign: "center", fontSize: 15 },

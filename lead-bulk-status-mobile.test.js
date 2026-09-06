@@ -240,10 +240,10 @@ test("Lead List bulk selection UX reuses existing status API without bulk endpoi
   assert.match(screen, /BULK_STATUS_CONCURRENCY/);
   assert.match(screen, /Alert\.alert/);
   assert.match(screen, /bulkStatusConfirmationCopy/);
-  assert.match(screen, /formatBulkStatusResult/);
+  assert.match(screen, /buildBulkStatusResult|formatBulkStatusResult/);
   assert.match(screen, /getProjectLeads/);
   assert.match(screen, /leadListDetailHref/);
-  assert.match(screen, /Updating \$\{completed\} of \$\{total\}/);
+  assert.match(screen, /formatBulkStatusProgress|Updating \$\{completed\} of \$\{total\}/);
   assert.match(screen, /bulkInFlight/);
   assert.doesNotMatch(screen, /bulkDelete|Delete Selected/i);
   assert.doesNotMatch(screen, /Bulk Remark|Add Remark to Selected/i);
