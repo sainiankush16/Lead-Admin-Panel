@@ -564,6 +564,12 @@ export default function LeadDetailScreen() {
                 mailtoHref={detail.mailtoHref}
                 timelineEvents={timelineEvents}
                 remarks={remarks}
+                onSelectNextStage={next => {
+                  setSelectedStatus(next);
+                  setStatusMessage(null);
+                  setStatusError(null);
+                  jumpToSection("status");
+                }}
               />
             </View>
 

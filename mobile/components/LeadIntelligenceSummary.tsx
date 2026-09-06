@@ -1,8 +1,10 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import { colors } from "@/constants/theme";
+import type { LeadStatusValue } from "@/constants/leadStatus";
 import type { Remark, TimelineEvent } from "@/types";
 import { getLeadIntelligence } from "@/utils/leadIntelligence";
+import { getPipelineConversionContext } from "@/utils/pipeline";
 
 interface LeadIntelligenceSummaryProps {
   status: string;
@@ -13,6 +15,7 @@ interface LeadIntelligenceSummaryProps {
   mailtoHref: string | null;
   timelineEvents: TimelineEvent[];
   remarks: Remark[];
+  onSelectNextStage?: (status: LeadStatusValue) => void;
 }
 
 export function LeadIntelligenceSummary({
@@ -23,7 +26,8 @@ export function LeadIntelligenceSummary({
   telHref,
   mailtoHref,
   timelineEvents,
-  remarks
+  remarks,
+  onSelectNextStage
 }: LeadIntelligenceSummaryProps) {
   const intelligence = getLeadIntelligence({
     status,
@@ -35,6 +39,7 @@ export function LeadIntelligenceSummary({
     timelineEvents,
     remarks
   });
+  const pipeline = getPipelineConversionContext(status);
 
   const { progress, readiness, stageSummary, signals, missing, activity, remarks: remarkInfo } =
     intelligence;
@@ -46,6 +51,31 @@ export function LeadIntelligenceSummary({
         {readiness}
       </Text>
       <Text style={styles.stageSummary}>{stageSummary}</Text>
+
+      <View style={styles.pipelineContext}>
+        <SignalRow label="Current Stage" value={pipeline.currentStage} />
+        <SignalRow label="Readiness" value={readiness} />
+        <SignalRow
+          label={pipeline.nextStage ? "Typical next stage" : "Next stage"}
+          value={pipeline.nextStageLabel}
+        />
+      </View>
+
+      {pipeline.moveToLabel && pipeline.nextStage && onSelectNextStage ? (
+        <View style={styles.moveBlock}>
+          <Pressable
+            style={styles.moveBtn}
+            accessibilityRole="button"
+            accessibilityLabel={pipeline.moveToLabel}
+            onPress={() => {
+              onSelectNextStage(pipeline.nextStage as LeadStatusValue);
+            }}
+          >
+            <Text style={styles.moveBtnText}>{pipeline.moveToLabel}</Text>
+          </Pressable>
+          <Text style={styles.moveHint}>Selects next stage. Save Status to apply.</Text>
+        </View>
+      ) : null}
 
       {progress.kind === "unknown" ? (
         <Text style={styles.unavailable}>{progress.unavailableLabel}</Text>
@@ -88,7 +118,6 @@ export function LeadIntelligenceSummary({
         <SignalRow label="Email" value={signals.emailAvailable ? "Available" : "Not available"} />
         <SignalRow label="Activity" value={activity.summary} />
         <SignalRow label="Remarks" value={remarkInfo.summary} />
-        <SignalRow label="Current Stage" value={intelligence.status} />
       </View>
 
       <View style={styles.missingBlock}>
@@ -141,6 +170,34 @@ const styles = StyleSheet.create({
     color: colors.textSoft,
     fontSize: 14,
     lineHeight: 20
+  },
+  pipelineContext: {
+    marginTop: 2,
+    gap: 6
+  },
+  moveBlock: {
+    gap: 4,
+    marginTop: 2
+  },
+  moveBtn: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: 10,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    justifyContent: "center"
+  },
+  moveBtnText: {
+    color: colors.accent,
+    fontWeight: "800",
+    fontSize: 13
+  },
+  moveHint: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16
   },
   unavailable: {
     color: colors.textMuted,

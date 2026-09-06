@@ -14,6 +14,7 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-rou
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadCard } from "@/components/LeadCard";
+import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { api, ApiClientError } from "@/services/api";
@@ -39,6 +40,7 @@ import {
   type BulkStatusResultView,
   type LeadListItem
 } from "@/utils/leadList";
+import { getPipelineCounts } from "@/utils/pipeline";
 
 const STATUS_FILTERS = ["All", ...LEAD_STATUSES, "Unknown"] as const;
 
@@ -150,6 +152,8 @@ export default function ProjectLeadsScreen() {
     () => filterLeadListItems(items, { query, status }),
     [items, query, status]
   );
+
+  const pipelineCounts = useMemo(() => getPipelineCounts(items), [items]);
 
   useEffect(() => {
     const prev = filterSnapshot.current;
@@ -313,6 +317,20 @@ export default function ProjectLeadsScreen() {
         <Text style={styles.count} accessibilityLabel={countLabel}>
           {countLabel}
         </Text>
+
+        {!loading && !error && items.length > 0 ? (
+          <PipelineSummaryCard
+            title="Pipeline"
+            counts={pipelineCounts}
+            compact
+            showAttention
+            showHealth={false}
+            onSelectStatus={option => {
+              if (bulkBusy) return;
+              selectStatus(option);
+            }}
+          />
+        ) : null}
 
         {status !== "All" ? (
           <View style={styles.activeFilter}>

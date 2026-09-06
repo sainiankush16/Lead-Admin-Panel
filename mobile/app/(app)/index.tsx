@@ -12,11 +12,11 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BRAND_NAME } from "@/constants/branding";
-import { LEAD_STATUSES } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiClientError } from "@/services/api";
 import { loadDashboardSummary } from "@/services/dashboard";
+import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
 import {
   ACTIONABLE_STATUSES,
   buildLeadListPath,
@@ -25,6 +25,7 @@ import {
   type ActionableStatus,
   type DashboardSummary
 } from "@/utils/dashboardSummary";
+import { resolvePipelineLeadTarget } from "@/utils/pipeline";
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat("en-IN").format(value);
@@ -80,6 +81,13 @@ export default function DashboardScreen() {
     const target = resolveActionableLeadTarget(summary, status);
     if (!target) return;
     openProjectLeads(target.projectId, target.status);
+  }
+
+  function openPipelineStatus(status: string) {
+    if (!summary) return;
+    const target = resolvePipelineLeadTarget(summary, status);
+    if (!target?.path) return;
+    router.push(target.path);
   }
 
   const showMetrics = Boolean(summary && summary.hasProjects);
@@ -166,27 +174,16 @@ export default function DashboardScreen() {
             </View>
 
             {summary.hasLeads ? (
-              <>
-                <Text style={styles.sectionTitle}>Lead Status</Text>
-                <View style={styles.statusGrid}>
-                  {LEAD_STATUSES.map(status => (
-                    <View
-                      key={status}
-                      style={styles.statusCard}
-                      accessibilityLabel={`${status}: ${summary.statuses[status]}`}
-                    >
-                      <Text style={styles.statusName}>{status}</Text>
-                      <Text style={styles.statusCount}>{formatCount(summary.statuses[status])}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {summary.unknownStatusCount > 0 ? (
-                  <Text style={styles.unknownNote}>
-                    Unknown / blank status: {formatCount(summary.unknownStatusCount)}
-                  </Text>
-                ) : null}
-              </>
+              <PipelineSummaryCard
+                title="Sales Pipeline"
+                counts={{
+                  statuses: summary.statuses,
+                  unknownStatusCount: summary.unknownStatusCount
+                }}
+                onSelectStatus={openPipelineStatus}
+                showAttention
+                showHealth
+              />
             ) : null}
 
             <Text style={styles.sectionTitle}>Projects</Text>
@@ -319,39 +316,6 @@ const styles = StyleSheet.create({
     color: colors.textSoft,
     fontSize: 12,
     fontWeight: "600"
-  },
-  statusGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 8
-  },
-  statusCard: {
-    flexBasis: "47%",
-    flexGrow: 1,
-    backgroundColor: colors.card,
-    borderColor: colors.cardBorder,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    minHeight: 76
-  },
-  statusName: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: "600"
-  },
-  statusCount: {
-    marginTop: 8,
-    color: colors.text,
-    fontSize: 24,
-    fontWeight: "700"
-  },
-  unknownNote: {
-    marginTop: 4,
-    marginBottom: 8,
-    color: colors.textMuted,
-    fontSize: 12
   },
   projectCard: {
     backgroundColor: colors.card,
