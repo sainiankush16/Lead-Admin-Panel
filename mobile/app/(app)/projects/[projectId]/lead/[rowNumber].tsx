@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -8,14 +8,17 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
+  type LayoutChangeEvent
 } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadContactActions } from "@/components/LeadContactActions";
 import { LeadContactRemarkSection } from "@/components/LeadContactRemarkSection";
+import { LeadDetailHeader } from "@/components/LeadDetailHeader";
 import { LeadFollowUpSection } from "@/components/LeadFollowUpSection";
+import { LeadNextActions } from "@/components/LeadNextActions";
 import { LeadRemarksSection } from "@/components/LeadRemarksSection";
 import { LeadTimelineSection } from "@/components/LeadTimelineSection";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
@@ -50,7 +53,7 @@ import {
   shouldSubmitStatusChange
 } from "@/utils/leadStatusEdit";
 import { mapTimelineLoadError } from "@/utils/leadTimeline";
-import { openExternalUrl } from "@/utils/linking";
+import { shouldCollapseAdditionalFieldsByDefault } from "@/utils/leadWorkflow";
 
 function FieldRow({ label, value }: { label: string; value: string }) {
   return (
@@ -95,10 +98,35 @@ export default function LeadDetailScreen() {
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [fieldsExpanded, setFieldsExpanded] = useState(false);
+  const [fieldsCollapseInitialized, setFieldsCollapseInitialized] = useState(false);
+
+  const scrollRef = useRef<ScrollView | null>(null);
+  const sectionOffsets = useRef<Record<string, number>>({});
 
   const syncSelectionFromDetail = useCallback((next: LeadDetailModel) => {
     setSelectedStatus(initialStatusSelection(next.status));
   }, []);
+
+  useEffect(() => {
+    setFieldsCollapseInitialized(false);
+  }, [leadId]);
+
+  useEffect(() => {
+    if (!detail || fieldsCollapseInitialized) return;
+    setFieldsExpanded(!shouldCollapseAdditionalFieldsByDefault(detail.fields.length));
+    setFieldsCollapseInitialized(true);
+  }, [detail, fieldsCollapseInitialized]);
+
+  function rememberSection(id: string, event: LayoutChangeEvent) {
+    sectionOffsets.current[id] = event.nativeEvent.layout.y;
+  }
+
+  function jumpToSection(id: string) {
+    const y = sectionOffsets.current[id];
+    if (y == null || !scrollRef.current) return;
+    scrollRef.current.scrollTo({ y: Math.max(0, y - 12), animated: true });
+  }
 
   const loadRemarks = useCallback(async () => {
     if (!leadId || !Number.isSafeInteger(projectId) || projectId <= 0) {
@@ -501,6 +529,7 @@ export default function LeadDetailScreen() {
           keyboardVerticalOffset={88}
         >
           <ScrollView
+            ref={scrollRef}
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
             refreshControl={
@@ -513,40 +542,32 @@ export default function LeadDetailScreen() {
               />
             }
           >
-            <Text style={styles.projectName}>{detail.projectName}</Text>
-            <Text style={styles.leadName}>{detail.name}</Text>
-
-            <LeadContactActions
-              name={detail.name}
-              telHref={detail.telHref}
-              waHref={detail.waHref}
-              mailtoHref={detail.mailtoHref}
-            />
-
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Phone</Text>
-              <Text style={styles.sectionValue}>{detail.phone || "—"}</Text>
+            <View onLayout={event => rememberSection("header", event)}>
+              <LeadDetailHeader
+                projectName={detail.projectName}
+                name={detail.name}
+                phone={detail.phone}
+                email={detail.email}
+                status={detail.status}
+              />
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Email</Text>
-              {detail.mailtoHref ? (
-                <Pressable
-                  accessibilityRole="link"
-                  accessibilityLabel={`Email ${detail.name}`}
-                  onPress={() => {
-                    void openExternalUrl(detail.mailtoHref, "Unable to open mail app.");
-                  }}
-                >
-                  <Text style={styles.linkValue}>{detail.email}</Text>
-                </Pressable>
-              ) : (
-                <Text style={styles.sectionValue}>{detail.email || "—"}</Text>
-              )}
+            <LeadNextActions onJump={jumpToSection} />
+
+            <View onLayout={event => rememberSection("contact", event)}>
+              <LeadContactActions
+                name={detail.name}
+                telHref={detail.telHref}
+                waHref={detail.waHref}
+                mailtoHref={detail.mailtoHref}
+              />
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Lead Status</Text>
+            <View
+              style={styles.section}
+              onLayout={event => rememberSection("status", event)}
+            >
+              <Text style={styles.sectionTitle}>Lead Status</Text>
               <Text style={styles.currentStatus}>
                 Current: {detail.status === "Unknown" || !detail.status ? "Unknown" : detail.status}
               </Text>
@@ -600,60 +621,93 @@ export default function LeadDetailScreen() {
               {statusError ? <Text style={styles.statusFail}>{statusError}</Text> : null}
             </View>
 
-            <LeadFollowUpSection
-              displayStatus={detail.status}
-              statusSaving={savingStatus}
-              remarkBusy={remarkBusy}
-              statusMessage={followUpStatusMessage}
-              statusError={followUpStatusError}
-              remarkMessage={followUpRemarkMessage}
-              remarkError={followUpRemarkError}
-              onMarkFollowUp={onMarkFollowUp}
-              onAddFollowUpRemark={onAddFollowUpRemark}
-              onRetryStatus={() => {
-                void onMarkFollowUp();
-              }}
-            />
+            <View onLayout={event => rememberSection("followUp", event)}>
+              <LeadFollowUpSection
+                displayStatus={detail.status}
+                statusSaving={savingStatus}
+                remarkBusy={remarkBusy}
+                statusMessage={followUpStatusMessage}
+                statusError={followUpStatusError}
+                remarkMessage={followUpRemarkMessage}
+                remarkError={followUpRemarkError}
+                onMarkFollowUp={onMarkFollowUp}
+                onAddFollowUpRemark={onAddFollowUpRemark}
+                onRetryStatus={() => {
+                  void onMarkFollowUp();
+                }}
+              />
+            </View>
 
-            <LeadContactRemarkSection
-              busy={remarkBusy}
-              message={contactRemarkMessage}
-              error={contactRemarkError}
-              onAdd={onAddContactRemark}
-            />
+            <View onLayout={event => rememberSection("contactRemark", event)}>
+              <LeadContactRemarkSection
+                busy={remarkBusy}
+                message={contactRemarkMessage}
+                error={contactRemarkError}
+                onAdd={onAddContactRemark}
+              />
+            </View>
 
-            <Text style={styles.infoTitle}>Lead Information</Text>
-            {detail.fields.length === 0 ? (
-              <Text style={styles.centerText}>No additional fields.</Text>
-            ) : (
-              detail.fields.map(field => (
-                <FieldRow key={field.header} label={field.header} value={field.value} />
-              ))
-            )}
+            <View onLayout={event => rememberSection("remarks", event)}>
+              <LeadRemarksSection
+                remarks={remarks}
+                loading={remarksLoading}
+                error={remarksError}
+                busy={remarkBusy}
+                user={user}
+                onRetry={() => {
+                  void loadRemarks();
+                }}
+                onAdd={onAddRemark}
+                onEdit={onEditRemark}
+                onDelete={onDeleteRemark}
+              />
+              {remarkMutationError ? <Text style={styles.statusFail}>{remarkMutationError}</Text> : null}
+            </View>
 
-            <LeadRemarksSection
-              remarks={remarks}
-              loading={remarksLoading}
-              error={remarksError}
-              busy={remarkBusy}
-              user={user}
-              onRetry={() => {
-                void loadRemarks();
-              }}
-              onAdd={onAddRemark}
-              onEdit={onEditRemark}
-              onDelete={onDeleteRemark}
-            />
-            {remarkMutationError ? <Text style={styles.statusFail}>{remarkMutationError}</Text> : null}
+            <View
+              style={styles.fieldsSection}
+              onLayout={event => rememberSection("fields", event)}
+            >
+              <Pressable
+                style={styles.fieldsToggle}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: fieldsExpanded }}
+                accessibilityLabel={
+                  fieldsExpanded ? "Collapse additional sheet fields" : "Expand additional sheet fields"
+                }
+                onPress={() => setFieldsExpanded(prev => !prev)}
+              >
+                <Text style={styles.sectionTitle}>Additional Sheet Fields</Text>
+                <Text style={styles.fieldsToggleText}>
+                  {fieldsExpanded ? "Hide" : `Show (${detail.fields.length})`}
+                </Text>
+              </Pressable>
 
-            <LeadTimelineSection
-              events={timelineEvents}
-              loading={timelineLoading}
-              error={timelineError}
-              onRetry={() => {
-                void loadTimeline();
-              }}
-            />
+              {fieldsExpanded ? (
+                detail.fields.length === 0 ? (
+                  <Text style={styles.centerText}>No additional fields.</Text>
+                ) : (
+                  detail.fields.map(field => (
+                    <FieldRow key={field.header} label={field.header} value={field.value} />
+                  ))
+                )
+              ) : (
+                <Text style={styles.fieldsHint}>
+                  Name, phone, email, and status are shown above. Expand to view remaining sheet columns.
+                </Text>
+              )}
+            </View>
+
+            <View onLayout={event => rememberSection("timeline", event)}>
+              <LeadTimelineSection
+                events={timelineEvents}
+                loading={timelineLoading}
+                error={timelineError}
+                onRetry={() => {
+                  void loadTimeline();
+                }}
+              />
+            </View>
 
             {error ? <Text style={styles.inlineError}>{error}</Text> : null}
           </ScrollView>
@@ -667,17 +721,13 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   content: { padding: 20, paddingBottom: 48 },
-  projectName: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
-  leadName: {
-    marginTop: 6,
-    color: colors.text,
-    fontSize: 28,
-    fontWeight: "800"
-  },
   section: { marginBottom: 16 },
-  sectionLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 4 },
-  sectionValue: { color: colors.text, fontSize: 16, lineHeight: 22 },
-  linkValue: { color: colors.accent, fontSize: 16, lineHeight: 22, fontWeight: "600" },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 10
+  },
   currentStatus: {
     color: colors.textSoft,
     fontSize: 14,
@@ -719,12 +769,20 @@ const styles = StyleSheet.create({
   saveBtnText: { color: colors.bg, fontWeight: "800", fontSize: 15 },
   statusSuccess: { marginTop: 10, color: colors.accent, fontSize: 13, fontWeight: "600" },
   statusFail: { marginTop: 10, color: colors.danger, fontSize: 13 },
-  infoTitle: {
-    marginTop: 10,
-    marginBottom: 12,
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "700"
+  fieldsSection: { marginTop: 8, marginBottom: 16 },
+  fieldsToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    marginBottom: 8
+  },
+  fieldsToggleText: { color: colors.accent, fontWeight: "800", fontSize: 13 },
+  fieldsHint: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 4
   },
   fieldRow: {
     borderBottomWidth: 1,
