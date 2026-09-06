@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy — Website CRM</title>
+  <style>
+    :root {
+      --bg: #0F172A;
+      --card: #1E293B;
+      --border: #334155;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+      --accent: #38BDF8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 8px; }
+    h2 { font-size: 1.15rem; margin: 28px 0 10px; color: var(--accent); }
+    p, li { color: var(--muted); font-size: 1rem; }
+    ul { padding-left: 1.2rem; }
+    .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.02em; }
+    .meta { font-size: 0.9rem; color: var(--muted); margin-bottom: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin: 16px 0;
+    }
+    .placeholder {
+      color: #FCD34D;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+    a { color: var(--accent); }
+    footer { margin-top: 40px; font-size: 0.9rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="brand">Website CRM</p>
+    <h1>Privacy Policy</h1>
+    <p class="meta">Effective date: <span class="placeholder">[EFFECTIVE DATE]</span></p>
+
+    <p>
+      This Privacy Policy describes how <span class="placeholder">[LEGAL BUSINESS NAME]</span>
+      (“we”, “us”, or “operator”) processes information when you use Website CRM,
+      including the web application and the Website CRM mobile application.
+    </p>
+
+    <div class="card">
+      <p>
+        Privacy contact:
+        <span class="placeholder">[PRIVACY CONTACT EMAIL]</span><br>
+        Support contact:
+        <span class="placeholder">[SUPPORT EMAIL]</span><br>
+        Business address (if applicable):
+        <span class="placeholder">[BUSINESS ADDRESS]</span>
+      </p>
+    </div>
+
+    <h2>1. Who operates Website CRM</h2>
+    <p>
+      Website CRM is operated by <span class="placeholder">[LEGAL BUSINESS NAME]</span>.
+      Replace the placeholders in this policy with your legal operator details before
+      App Store or Google Play submission.
+    </p>
+
+    <h2>2. What Website CRM is</h2>
+    <p>
+      Website CRM is a lead management CRM. Authorized users sign in with Website CRM
+      credentials. Lead and customer fields are primarily read from and written back to
+      Google Sheets that an administrator connects for project use. Website CRM does not
+      independently create a separate marketing lead database apart from those connected
+      sheets and related operational records described below.
+    </p>
+
+    <h2>3. Information we process</h2>
+    <p>Depending on how you use Website CRM, we may process:</p>
+    <ul>
+      <li>
+        <strong>Account information:</strong> name, login ID, role (Admin or Project User),
+        account active status, and a password hash stored for authentication
+        (passwords are not stored in plaintext).
+      </li>
+      <li>
+        <strong>Session and security information:</strong> web session identifiers,
+        mobile session tokens (stored as irreversible hashes), CSRF tokens for browser
+        requests, and session version values used to invalidate sessions.
+      </li>
+      <li>
+        <strong>Lead / customer information from connected Google Sheets:</strong>
+        values present in authorized project sheets (for example name, phone, email,
+        Lead Status, and other sheet columns configured for a project).
+      </li>
+      <li>
+        <strong>Operational CRM records:</strong> remarks and timeline/activity records
+        associated with leads in authorized projects, including actor/author references
+        for audit history.
+      </li>
+      <li>
+        <strong>Google authorization information (administrator Sheets connection):</strong>
+        Google account identifiers (such as Google subject ID, email, name, picture URL)
+        and an encrypted Google OAuth refresh token used only to access Sheets/Drive APIs
+        for connected projects. Google OAuth is not the normal Website CRM login method.
+        Administrators may disconnect Google authorization from the web Google Sheets
+        connection screen. Disconnect removes stored Google credentials from Website CRM
+        and does not delete Website CRM projects, remarks, timeline history, accounts, or
+        Google Sheets/Drive files.
+      </li>
+      <li>
+        <strong>Project configuration:</strong> project names, spreadsheet identifiers,
+        sheet titles, column metadata, and sync snapshot metadata needed to operate projects.
+      </li>
+    </ul>
+    <p>
+      Website CRM does not include advertising SDKs, analytics SDKs, push-notification SDKs,
+      or device-tracking SDKs based on the current application architecture. The mobile app
+      stores an opaque session token in secure on-device storage for authentication.
+    </p>
+
+    <h2>4. Sources of information</h2>
+    <ul>
+      <li>Information you provide when an administrator creates your Website CRM account.</li>
+      <li>Information you enter while using the product (for example remarks or status updates).</li>
+      <li>Lead values synchronized from Google Sheets authorized by an administrator.</li>
+      <li>Google profile and OAuth token data when an administrator authorizes Sheets access.</li>
+      <li>Technical session metadata created when you authenticate.</li>
+    </ul>
+
+    <h2>5. How we use information</h2>
+    <ul>
+      <li>Authenticate users and enforce Admin / Project User authorization.</li>
+      <li>Display and update lead information for authorized projects.</li>
+      <li>Record remarks and timeline events for operational history.</li>
+      <li>Allow administrators to connect Google Sheets/Drive and manage projects and users.</li>
+      <li>Secure sessions, invalidate access after password or status changes, and support account deletion.</li>
+    </ul>
+
+    <h2>6. Storage and infrastructure</h2>
+    <p>
+      Application data is stored in the configured backend database (local SQLite in some
+      development setups, or Turso/libSQL when configured for production). Google OAuth
+      refresh tokens are stored encrypted at rest using server-side encryption keys.
+      Lead field values remain in the connected Google Sheets; the CRM reads and updates
+      those sheets through Google APIs.
+    </p>
+
+    <h2>7. Who can access information</h2>
+    <ul>
+      <li><strong>Administrators</strong> may access authorized projects, user management, and Google connection status.</li>
+      <li><strong>Project Users</strong> may access only projects assigned to them.</li>
+      <li>Service operators with access to the hosting environment and database credentials can access server-stored data as needed to operate the service.</li>
+    </ul>
+
+    <h2>8. Third-party services</h2>
+    <ul>
+      <li>
+        <strong>Google APIs (Sheets and Drive):</strong> used to list spreadsheets, read sheet
+        data, and update Lead Status values for connected projects. Google’s terms and privacy
+        policy also apply to Google’s processing.
+      </li>
+      <li>
+        <strong>Database hosting (for example Turso):</strong> may store application records
+        when configured by the operator.
+      </li>
+      <li>
+        <strong>Application hosting:</strong> the operator’s chosen host (for example a
+        deployment platform) may process request traffic necessary to serve the application.
+      </li>
+    </ul>
+    <p>We do not sell personal information.</p>
+
+    <h2>9. Security</h2>
+    <p>
+      We use industry-standard controls appropriate to this architecture, including password
+      hashing (Argon2id), encrypted storage of Google refresh tokens, session authentication,
+      CSRF protection for browser cookie sessions, bearer-token authentication for the mobile
+      app, and role-based authorization. No method of transmission or storage is completely secure.
+    </p>
+
+    <h2>10. Retention</h2>
+    <p>
+      Account credentials and session data are retained while the account is active and as needed
+      for security. After account deletion, Website CRM anonymizes the account record, removes
+      project assignments, and invalidates sessions. Remarks and timeline history may remain for
+      business audit continuity with de-identified author/actor display where applicable.
+      Lead rows in Google Sheets remain under the control of the Google account and spreadsheet
+      owners and are not deleted by Website CRM account deletion. Project and Sheets configuration
+      are retained until an authorized administrator removes them or changes the connected sheets.
+      Website CRM does not currently run separate automatic purge jobs beyond session/token expiry behavior.
+    </p>
+
+    <h2>11. Account deletion</h2>
+    <p>
+      Signed-in users may permanently delete their Website CRM account from the mobile app
+      (More → Delete Account). Deletion is performed by the server after authentication and
+      irreversibly de-identifies personal account fields (name, login ID, password hash),
+      deactivates the account, removes that user’s project assignments, and invalidates
+      sessions. Temporary freezing alone is not used as a substitute for deleting personal
+      account data.
+    </p>
+    <p>
+      Users who cannot use the in-app flow may request deletion without reinstalling the app
+      via the public page
+      <a href="/delete-account">/delete-account</a>
+      (instructions and privacy/support contact). Public visitors cannot delete an arbitrary
+      account from that page without operator identity verification.
+    </p>
+    <p>
+      The final remaining administrator account cannot be deleted until another administrator
+      exists, to avoid locking the system. Account deletion does not delete Google Sheets,
+      shared project lead rows, other users’ accounts, remarks/timeline business history, or the
+      shared Google Sheets authorization used by Website CRM. Google authorization is a separate
+      administrative connection (not bound to an individual CRM login). To remove Google
+      credentials, an administrator should use Disconnect Google on the web Google Sheets
+      connection screen.
+    </p>
+
+    <h2>12. Your rights and requests</h2>
+    <p>
+      Depending on applicable law, you may request access, correction, or deletion of personal
+      information we control. Contact
+      <span class="placeholder">[PRIVACY CONTACT EMAIL]</span>
+      or use
+      <a href="/delete-account">/delete-account</a>.
+      Some lead data resides in Google Sheets controlled by your organization; those requests
+      may need to be handled with your spreadsheet administrator as well.
+    </p>
+
+    <h2>13. Children</h2>
+    <p>
+      Website CRM is intended for business use by authorized organization users. It is not
+      directed to children.
+    </p>
+
+    <h2>14. Changes</h2>
+    <p>
+      We may update this Privacy Policy. The effective date above will be revised when changes
+      are published at this URL.
+    </p>
+
+    <h2>15. Contact</h2>
+    <p>
+      Questions about this policy:
+      <span class="placeholder">[PRIVACY CONTACT EMAIL]</span>.
+    </p>
+
+    <footer>
+      <a href="/terms">Terms of Use</a> ·
+      <a href="/delete-account">Delete Account</a> ·
+      <span class="brand">Website CRM</span>
+    </footer>
+  </main>
+</body>
+</html>

@@ -1,13 +1,17 @@
-# CHATURX Lead Management — Mobile (Expo)
+# Website CRM — Mobile (Expo)
 
-Isolated React Native / Expo client for the existing Lead Admin backend.
+Isolated React Native / Expo client for the existing Website CRM backend.
 
-The website under `public/` and the backend at the repo root are **not** part of this package and must remain unchanged.
+Visible product name: **Website CRM**  
+Package / bundle identity: `com.chaturx.leads`
+
+The website under `public/` and the backend at the repo root remain separate from this package.
 
 ## Requirements
 
 - Node.js 20+
 - Expo Go (optional) or iOS Simulator / Android Emulator
+- For store builds: Expo/EAS account (owner action)
 
 ## Setup
 
@@ -17,10 +21,23 @@ cp .env.example .env
 npm install
 ```
 
-Set `EXPO_PUBLIC_API_BASE_URL` to your backend origin only (no secrets).
+Set public environment variables only (no secrets):
+
+| Variable | Purpose |
+|---|---|
+| `EXPO_PUBLIC_API_BASE_URL` | Backend API origin |
+| `EXPO_PUBLIC_LEGAL_BASE_URL` | Privacy/Terms origin (optional; defaults to API or production host) |
+
+Development examples:
 
 - Simulator: `http://localhost:3000`
-- Physical phone: `http://<your-mac-lan-ip>:3000` (localhost on the phone is the phone itself)
+- Physical phone: `http://<your-mac-lan-ip>:3000`
+
+Production (also applied by `eas.json` production profile):
+
+- `https://lead-admin-panel.vercel.app`
+
+Never put `SESSION_SECRET`, `TOKEN_ENCRYPTION_KEY`, Turso tokens, Google client secrets, or passwords in mobile env.
 
 ## Start
 
@@ -29,25 +46,38 @@ cd mobile
 npm start
 ```
 
-Then press `i` for iOS simulator or `a` for Android emulator, or scan the QR code with Expo Go.
+## Production builds (EAS)
+
+`eas.json` defines `development`, `preview`, and `production` profiles.
+
+Owner actions still required:
+
+1. Install/login to EAS CLI
+2. Link/create an Expo project (`eas init` / project ID)
+3. Configure Apple/Google credentials in EAS
+4. Run builds (do not submit from this phase alone)
+
+Example (owner-run, not performed automatically by Phase 30):
+
+```bash
+cd mobile
+eas build --platform ios --profile production
+eas build --platform android --profile production
+```
 
 ## Scripts
 
 - `npm start` — Expo dev server
-- `npm run ios` — open iOS
-- `npm run android` — open Android
+- `npm run ios` / `npm run android`
 - `npm run typecheck` — TypeScript check
+- `npm test` — mobile-related Node tests
 
-## Authentication (Phase 4)
-
-Mobile login uses dedicated endpoints:
+## Authentication
 
 - `POST /api/mobile/auth/login`
 - `GET /api/mobile/auth/me`
 - `POST /api/mobile/auth/logout`
 
-The opaque session token is stored in **Expo SecureStore** and sent as:
+Opaque session token stored in **Expo SecureStore** and sent as `Authorization: Bearer <token>`.
 
-`Authorization: Bearer <token>`
-
-The website continues to use cookie sessions + CSRF. Do not put secrets in `EXPO_PUBLIC_*`.
+Website continues to use cookie sessions + CSRF.

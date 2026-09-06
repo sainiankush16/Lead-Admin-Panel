@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delete Account — Website CRM</title>
+  <style>
+    :root {
+      --bg: #0F172A;
+      --card: #1E293B;
+      --border: #334155;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+      --accent: #38BDF8;
+      --warn: #FCD34D;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 { font-size: 1.75rem; margin: 0 0 8px; }
+    h2 { font-size: 1.15rem; margin: 28px 0 10px; color: var(--accent); }
+    p, li { color: var(--muted); font-size: 1rem; }
+    ul { padding-left: 1.2rem; }
+    .brand { color: var(--accent); font-weight: 700; letter-spacing: 0.02em; }
+    .meta { font-size: 0.9rem; color: var(--muted); margin-bottom: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin: 16px 0;
+    }
+    .placeholder {
+      color: var(--warn);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.92em;
+    }
+    a { color: var(--accent); }
+    footer { margin-top: 40px; font-size: 0.9rem; color: var(--muted); }
+    strong { color: var(--text); }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="brand">Website CRM</p>
+    <h1>Account deletion</h1>
+    <p class="meta">
+      Public request page for Website CRM account and associated personal account data deletion.
+      No login is required to view these instructions.
+    </p>
+
+    <div class="card">
+      <p>
+        This page is for <strong>Website CRM</strong> (mobile and web).
+        It explains how to delete your Website CRM login account and what happens to data.
+      </p>
+    </div>
+
+    <h2>1. Delete from the Website CRM mobile app (recommended when signed in)</h2>
+    <p>
+      If you can still open Website CRM and sign in:
+    </p>
+    <ol>
+      <li>Open <strong>Website CRM</strong> on your device.</li>
+      <li>Go to <strong>More</strong>.</li>
+      <li>Choose <strong>Delete Account</strong>.</li>
+      <li>Confirm the irreversible deletion prompt.</li>
+    </ol>
+    <p>
+      Authenticated deletion permanently removes your ability to sign in and irreversibly
+      de-identifies your personal account fields on the Website CRM servers.
+    </p>
+
+    <h2>2. Request deletion without the app (web / email)</h2>
+    <p>
+      If you cannot use the in-app flow (for example you uninstalled the app), request deletion
+      by contacting the privacy contact below. Include:
+    </p>
+    <ul>
+      <li>Your Website CRM login ID (do not send passwords).</li>
+      <li>Your full name as shown on the account, if known.</li>
+      <li>Subject line: <strong>Website CRM Account Deletion Request</strong>.</li>
+    </ul>
+    <div class="card">
+      <p>
+        Privacy contact:
+        <span class="placeholder">[PRIVACY CONTACT EMAIL]</span><br>
+        Support contact:
+        <span class="placeholder">[SUPPORT EMAIL]</span>
+      </p>
+      <p>
+        After identity verification by the operator, the same account-deletion process used by
+        the authenticated API is applied. This page does <strong>not</strong> delete accounts
+        automatically from a public form, and nobody can delete an arbitrary account by entering
+        only an email address here.
+      </p>
+    </div>
+
+    <h2>3. What is deleted or irreversibly de-identified</h2>
+    <ul>
+      <li>Personal account name (replaced with “Deleted User”).</li>
+      <li>Login ID (replaced with a unique deleted identifier).</li>
+      <li>Password hash (replaced with an unusable value).</li>
+      <li>Active account status (account deactivated).</li>
+      <li>Project assignments for that user.</li>
+      <li>Mobile session tokens and matching web sessions (signed out everywhere).</li>
+    </ul>
+
+    <h2>4. What may be retained (business / audit)</h2>
+    <ul>
+      <li>Shared projects and Google Sheets configuration.</li>
+      <li>Lead rows stored in Google Sheets (owned by the spreadsheet / Google account holders).</li>
+      <li>Remarks and timeline history needed for CRM audit continuity (authors may display as “Deleted User”).</li>
+      <li>Shared Google Sheets authorization used by Website CRM administrators (not removed by deleting a CRM login; use Disconnect Google on the web admin screen to clear credentials).</li>
+    </ul>
+    <p>
+      Temporary freezing alone is not used as a substitute for deletion of personal account data.
+      Personal identifiers on the account record are irreversibly removed or replaced.
+      Account deletion does not delete Google Sheets, shared project lead rows, or other users’
+      accounts.
+    </p>
+
+    <h2>5. Final administrator</h2>
+    <p>
+      The last active administrator cannot delete their own account until another administrator
+      exists, so the organization is not left without administrative access. Contact
+      <span class="placeholder">[SUPPORT EMAIL]</span>
+      if you need help transferring administration before deletion.
+    </p>
+
+    <h2>6. Related policies</h2>
+    <p>
+      See the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Use</a>
+      for retention and security details.
+    </p>
+
+    <footer>
+      <a href="/privacy">Privacy Policy</a> ·
+      <a href="/terms">Terms of Use</a> ·
+      <span class="brand">Website CRM</span>
+    </footer>
+  </main>
+</body>
+</html>

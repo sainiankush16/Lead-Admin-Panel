@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CHATURX",
+    "name": "Website CRM",
     "slug": "chaturx",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,7 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.chaturx.leads"
+      "bundleIdentifier": "com.chaturx.leads",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -20,6 +21,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "package": "com.chaturx.leads",
+      "versionCode": 1,
       "predictiveBackGestureEnabled": false
     },
     "web": {

@@ -1,6 +1,7 @@
 import { Redirect, Tabs } from "expo-router";
 import { Text } from "react-native";
 
+import { ScreenCaptureProtection } from "@/components/ScreenCaptureProtection";
 import { useAuth } from "@/hooks/useAuth";
 import { colors } from "@/constants/theme";
 
@@ -22,57 +23,59 @@ export default function AppTabsLayout() {
   const isAdmin = user?.role === "admin";
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor: colors.tab,
-          borderTopColor: colors.cardBorder,
-          height: 64,
-          paddingBottom: 8,
-          paddingTop: 8
-        },
-        tabBarActiveTintColor: colors.tabActive,
-        tabBarInactiveTintColor: colors.textMuted
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: "Dashboard",
-          tabBarLabel: ({ focused }) => <TabLabel label="Dashboard" focused={focused} />
-        }}
-      />
-      <Tabs.Screen
-        name="projects"
-        options={{
-          title: "Projects",
+    <ScreenCaptureProtection enabled>
+      <Tabs
+        screenOptions={{
           headerShown: false,
-          tabBarLabel: ({ focused }) => <TabLabel label="Projects" focused={focused} />
+          tabBarStyle: {
+            backgroundColor: colors.tab,
+            borderTopColor: colors.cardBorder,
+            height: 64,
+            paddingBottom: 8,
+            paddingTop: 8
+          },
+          tabBarActiveTintColor: colors.tabActive,
+          tabBarInactiveTintColor: colors.textMuted
         }}
-      />
-      <Tabs.Screen
-        name="search"
-        options={{
-          title: "Search",
-          tabBarLabel: ({ focused }) => <TabLabel label="Search" focused={focused} />
-        }}
-      />
-      <Tabs.Screen
-        name="users"
-        options={{
-          title: "Users",
-          href: isAdmin ? undefined : null,
-          tabBarLabel: ({ focused }) => <TabLabel label="Users" focused={focused} />
-        }}
-      />
-      <Tabs.Screen
-        name="more"
-        options={{
-          title: "More",
-          tabBarLabel: ({ focused }) => <TabLabel label="More" focused={focused} />
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: "Dashboard",
+            tabBarLabel: ({ focused }) => <TabLabel label="Dashboard" focused={focused} />
+          }}
+        />
+        <Tabs.Screen
+          name="projects"
+          options={{
+            title: "Projects",
+            headerShown: false,
+            tabBarLabel: ({ focused }) => <TabLabel label="Projects" focused={focused} />
+          }}
+        />
+        <Tabs.Screen
+          name="search"
+          options={{
+            title: "Search",
+            tabBarLabel: ({ focused }) => <TabLabel label="Search" focused={focused} />
+          }}
+        />
+        <Tabs.Screen
+          name="users"
+          options={{
+            title: "Users",
+            href: isAdmin ? undefined : null,
+            tabBarLabel: ({ focused }) => <TabLabel label="Users" focused={focused} />
+          }}
+        />
+        <Tabs.Screen
+          name="more"
+          options={{
+            title: "More",
+            tabBarLabel: ({ focused }) => <TabLabel label="More" focused={focused} />
+          }}
+        />
+      </Tabs>
+    </ScreenCaptureProtection>
   );
 }

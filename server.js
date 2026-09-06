@@ -63,6 +63,10 @@ const {
   sessionStoreDestroy
 } = require("./mobile-auth");
 const {
+  deleteAuthenticatedAccount,
+  accountDeletionResponseBody
+} = require("./account-deletion");
+const {
   TIMELINE_EVENT_TYPES,
   leadIdFromRowNumber,
   recordLeadGeneratedForRows,
@@ -84,6 +88,10 @@ const {
   getAuthUrl, exchangeCode, clientFromRefreshToken, getGoogleProfile,
   listSpreadsheets, getTabs, readSheet, writeLeadStatus, createLeadStatusColumn
 } = require("./google");
+const {
+  disconnectGoogleAuthorization,
+  googleDisconnectResponseBody
+} = require("./google-disconnect");
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
@@ -701,6 +709,49 @@ app.post("/api/mobile/auth/logout", requireAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * Authenticated account deletion (mobile bearer or web cookie + CSRF).
+ * Server derives the account from the session. Does not delete Google Sheets or lead rows.
+ */
+app.delete("/api/account", requireAuth, csrfProtection, async (req, res, next) => {
+  try {
+    const confirm = String(req.body?.confirm || "").trim();
+    if (confirm !== "DELETE") {
+      return res.status(400).json({
+        error: 'Confirmation required. Send JSON body { "confirm": "DELETE" }.'
+      });
+    }
+
+    const currentSid = req.mobileBoundSid || req.sessionID || null;
+    const result = await deleteAuthenticatedAccount(db, {
+      user: req.user,
+      sessionStore,
+      currentSid
+    });
+
+    if (!result.ok) {
+      return res.status(result.statusCode || 400).json({ error: result.error || "Unable to delete account." });
+    }
+
+    const finish = () => {
+      res.clearCookie("lead_admin_sid");
+      res.json(accountDeletionResponseBody());
+    };
+
+    if (typeof req.session?.destroy === "function") {
+      req.session.destroy(err => {
+        if (err) return next(err);
+        finish();
+      });
+      return;
+    }
+
+    finish();
+  } catch (err) {
+    next(err);
+  }
+});
+
 /* -------------------- GOOGLE SHEETS (admin) -------------------- */
 
 app.get("/api/sheets", requireAdmin, async (req, res) => {
@@ -732,6 +783,26 @@ app.get("/api/google/status", requireAdmin, async (req, res, next) => {
       email: connection?.email || null,
       name: connection?.name || null
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Admin-only Google Sheets disconnect.
+ * Clears stored encrypted refresh tokens. Does not delete projects, sheets, or CRM accounts.
+ */
+app.post("/api/google/disconnect", requireAdmin, csrfProtection, async (req, res, next) => {
+  try {
+    const connection = await getGoogleConnection();
+    const result = await disconnectGoogleAuthorization(db, {
+      connection,
+      decryptFn: decrypt
+    });
+    if (!result.ok) {
+      return res.status(result.statusCode || 400).json({ error: result.error || "Unable to disconnect Google." });
+    }
+    res.json(googleDisconnectResponseBody(result.value));
   } catch (err) {
     next(err);
   }
@@ -1251,6 +1322,18 @@ app.post("/api/sync", requireAdmin, csrfProtection, async (req, res) => {
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "lead-admin-backend", time: new Date().toISOString() });
+});
+
+app.get("/privacy", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "privacy.html"));
+});
+
+app.get("/terms", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "terms.html"));
+});
+
+app.get("/delete-account", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "delete-account.html"));
 });
 
 app.get(/.*/, (req, res, next) => {

@@ -155,6 +155,7 @@ async function createLeadStatusColumn(client, spreadsheetId, sheetTitle, columnI
 
 module.exports = {
   SCOPES,
+  oauth2Client,
   getAuthUrl,
   exchangeCode,
   clientFromRefreshToken,

@@ -27,6 +27,7 @@
   let uiBound = false;
   let loginSubmitStarted = false;
   let googleConnectStarted = false;
+  let googleDisconnectStarted = false;
   let activeLeadDetail = null;
 
   const $ = id => document.getElementById(id);
@@ -184,6 +185,7 @@
   function updateGoogleConnectionStatus() {
     const status = $("googleConnectionStatus");
     const signedInText = $("oauthSignedInText");
+    const disconnectBtn = $("googleDisconnectBtn");
     if (!status) return;
     if (googleConnected) {
       status.textContent = googleEmail
@@ -191,14 +193,16 @@
         : "Google Sheets is connected.";
       if (signedInText) {
         signedInText.textContent = googleEmail
-          ? `Sheets access authorized for ${googleEmail}. Reauthorize if access was revoked or scopes change.`
+          ? `Sheets access authorized for ${googleEmail}. Reauthorize if access was revoked or scopes change. Disconnect stops Website CRM from using Google authorization without deleting projects or sheet data.`
           : "Sheets access is authorized. Select a spreadsheet and tab below to connect a project.";
       }
+      if (disconnectBtn) disconnectBtn.hidden = !isAdmin();
     } else {
       status.textContent = "Google Sheets is not connected.";
       if (signedInText) {
         signedInText.textContent = "Connect a Google account to list spreadsheets and sync leads. Admin login is required.";
       }
+      if (disconnectBtn) disconnectBtn.hidden = true;
     }
   }
 
@@ -1770,6 +1774,35 @@
     location.assign("/api/auth/google?returnTo=/");
   }
 
+  async function googleDisconnect() {
+    if (!isAdmin()) return;
+    if (googleDisconnectStarted) return;
+    if (
+      !confirm(
+        "Disconnect Google?\n\nWebsite CRM will stop using the connected Google authorization. Your Website CRM projects and lead data will not be deleted."
+      )
+    ) {
+      return;
+    }
+
+    googleDisconnectStarted = true;
+    const btn = $("googleDisconnectBtn");
+    if (btn) btn.disabled = true;
+    try {
+      const result = await api("/api/google/disconnect", { method: "POST" });
+      googleConnected = false;
+      googleEmail = null;
+      updateGoogleConnectionStatus();
+      showToast(result?.message || "Google authorization has been disconnected.");
+      await loadSpreadsheets().catch(() => undefined);
+    } catch (err) {
+      showToast(err?.message || "Unable to disconnect Google.");
+    } finally {
+      googleDisconnectStarted = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function logout() {
     try {
       await api("/api/auth/logout", { method: "POST" });
@@ -1834,6 +1867,7 @@
       }
     });
     on("googleConnectBtn", "click", googleConnect);
+    on("googleDisconnectBtn", "click", () => { googleDisconnect(); });
     on("mobileMenuBtn", "click", toggleSidebar);
     on("syncAllBtn", "click", () => { syncAllSheets(); });
     on("addProjectFromDashboardBtn", "click", () => showView("connections"));

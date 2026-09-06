@@ -134,6 +134,13 @@ class ApiClient {
     return this.request<{ ok: boolean }>("/api/mobile/auth/logout", { method: "POST" });
   }
 
+  deleteAccount() {
+    return this.request<{ ok: boolean; deleted: boolean; message?: string }>("/api/account", {
+      method: "DELETE",
+      body: { confirm: "DELETE" }
+    });
+  }
+
   getProjects() {
     return this.request<{ projects: Project[] }>("/api/projects");
   }

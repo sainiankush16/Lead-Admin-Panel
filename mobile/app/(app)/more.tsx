@@ -15,11 +15,15 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { BRAND_NAME, BRAND_TAGLINE } from "@/constants/branding";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
+import { getLegalBaseUrl } from "@/lib/config";
+import { api, ApiClientError } from "@/services/api";
 import {
   configuredLegalLinks,
+  deleteAccountConfirmationCopy,
   logoutConfirmationCopy,
   mapAccountInfo,
-  mapAppInfo
+  mapAppInfo,
+  mapDeleteAccountError
 } from "@/utils/accountSettings";
 import { openExternalUrl } from "@/utils/linking";
 
@@ -39,6 +43,7 @@ function resolveBuildNumber() {
 export default function MoreScreen() {
   const { user, logout, status } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const account = useMemo(() => mapAccountInfo(user), [user]);
   const appInfo = useMemo(
@@ -50,10 +55,13 @@ export default function MoreScreen() {
       }),
     []
   );
-  const legalLinks = useMemo(() => configuredLegalLinks(), []);
+  const legalLinks = useMemo(
+    () => configuredLegalLinks({ legalBaseUrl: getLegalBaseUrl() }),
+    []
+  );
 
   function confirmLogout() {
-    if (busy) return;
+    if (busy || deleting) return;
     const copy = logoutConfirmationCopy();
     Alert.alert(copy.title, copy.message, [
       { text: copy.cancel, style: "cancel" },
@@ -68,7 +76,7 @@ export default function MoreScreen() {
   }
 
   async function runLogout() {
-    if (busy) return;
+    if (busy || deleting) return;
     setBusy(true);
     try {
       await logout();
@@ -76,6 +84,43 @@ export default function MoreScreen() {
       setBusy(false);
     }
   }
+
+  function confirmDeleteAccount() {
+    if (busy || deleting) return;
+    const copy = deleteAccountConfirmationCopy();
+    Alert.alert(copy.title, copy.message, [
+      { text: copy.cancel, style: "cancel" },
+      {
+        text: copy.confirm,
+        style: "destructive",
+        onPress: () => {
+          void runDeleteAccount();
+        }
+      }
+    ]);
+  }
+
+  async function runDeleteAccount() {
+    if (busy || deleting) return;
+    setDeleting(true);
+    try {
+      await api.deleteAccount();
+      Alert.alert(
+        "Account deleted",
+        "Your Website CRM account has been permanently deleted."
+      );
+      // Clears SecureStore and auth state. Server sessions are already invalidated.
+      await logout();
+    } catch (err) {
+      const statusCode = err instanceof ApiClientError ? err.status : 0;
+      const serverMessage = err instanceof ApiClientError ? err.message : undefined;
+      Alert.alert("Unable to delete account", mapDeleteAccountError(statusCode, serverMessage));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const actionBusy = busy || deleting;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -131,33 +176,29 @@ export default function MoreScreen() {
           ) : null}
         </View>
 
-        {legalLinks.length > 0 ? (
-          <>
-            <Text style={styles.section}>Legal</Text>
-            <View style={styles.card}>
-              {legalLinks.map(link => (
-                <Pressable
-                  key={link.url}
-                  accessibilityRole="link"
-                  accessibilityLabel={link.label}
-                  onPress={() => {
-                    void openExternalUrl(link.url, "Unable to open link.");
-                  }}
-                >
-                  <Text style={styles.link}>{link.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </>
-        ) : null}
+        <Text style={styles.section}>Legal & Privacy</Text>
+        <View style={styles.card}>
+          {legalLinks.map(link => (
+            <Pressable
+              key={link.url}
+              accessibilityRole="link"
+              accessibilityLabel={link.label}
+              onPress={() => {
+                void openExternalUrl(link.url, "Unable to open link.");
+              }}
+            >
+              <Text style={styles.link}>{link.label}</Text>
+            </Pressable>
+          ))}
+        </View>
 
         <Text style={styles.section}>Account Action</Text>
         <Pressable
-          style={[styles.logoutBtn, busy && styles.disabled]}
-          disabled={busy}
+          style={[styles.logoutBtn, actionBusy && styles.disabled]}
+          disabled={actionBusy}
           accessibilityRole="button"
           accessibilityLabel="Logout"
-          accessibilityState={{ busy }}
+          accessibilityState={{ busy: actionBusy }}
           onPress={confirmLogout}
         >
           {busy ? (
@@ -166,6 +207,25 @@ export default function MoreScreen() {
             <Text style={styles.logoutText}>Logout</Text>
           )}
         </Pressable>
+
+        <Pressable
+          style={[styles.deleteBtn, actionBusy && styles.disabled]}
+          disabled={actionBusy}
+          accessibilityRole="button"
+          accessibilityLabel="Delete Account"
+          accessibilityState={{ busy: deleting }}
+          onPress={confirmDeleteAccount}
+        >
+          {deleting ? (
+            <ActivityIndicator color={colors.danger} />
+          ) : (
+            <Text style={styles.deleteText}>Delete Account</Text>
+          )}
+        </Pressable>
+        <Text style={styles.deleteHint}>
+          Permanent. Removes your Website CRM login. Does not delete Google Sheets or shared lead
+          rows.
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -220,6 +280,23 @@ const styles = StyleSheet.create({
     minHeight: 48,
     alignItems: "center",
     justifyContent: "center"
+  },
+  deleteBtn: {
+    marginTop: 12,
+    borderRadius: 10,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.danger,
+    backgroundColor: colors.card
+  },
+  deleteText: { color: colors.danger, fontWeight: "800", fontSize: 16 },
+  deleteHint: {
+    marginTop: 10,
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17
   },
   disabled: { opacity: 0.7 },
   logoutText: { color: colors.bg, fontWeight: "800", fontSize: 16 }

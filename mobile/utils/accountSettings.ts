@@ -11,9 +11,12 @@ const core = require("./accountSettingsCore.js") as {
     buildNumber?: string | null;
     platform?: string | null;
   }) => AppInfoView;
+  normalizeLegalBaseUrl: (value: string | null | undefined) => string;
   configuredLegalLinks: (config?: {
+    legalBaseUrl?: string;
     privacyPolicyUrl?: string;
     termsUrl?: string;
+    deleteAccountUrl?: string;
     supportUrl?: string;
   }) => Array<{ label: string; url: string }>;
   accountViewContainsSensitiveFields: (viewModel: unknown) => boolean;
@@ -23,6 +26,14 @@ const core = require("./accountSettingsCore.js") as {
     cancel: string;
     confirm: string;
   };
+  deleteAccountConfirmationCopy: () => {
+    title: string;
+    message: string;
+    cancel: string;
+    confirm: string;
+    confirmToken: string;
+  };
+  mapDeleteAccountError: (status: number | null | undefined, fallbackMessage?: string) => string;
 };
 
 export interface AccountInfoView {
@@ -44,6 +55,9 @@ export const displayRoleLabel = core.displayRoleLabel;
 export const displayAccountStatus = core.displayAccountStatus;
 export const mapAccountInfo = core.mapAccountInfo;
 export const mapAppInfo = core.mapAppInfo;
+export const normalizeLegalBaseUrl = core.normalizeLegalBaseUrl;
 export const configuredLegalLinks = core.configuredLegalLinks;
 export const accountViewContainsSensitiveFields = core.accountViewContainsSensitiveFields;
 export const logoutConfirmationCopy = core.logoutConfirmationCopy;
+export const deleteAccountConfirmationCopy = core.deleteAccountConfirmationCopy;
+export const mapDeleteAccountError = core.mapDeleteAccountError;
