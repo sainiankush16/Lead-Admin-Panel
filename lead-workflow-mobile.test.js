@@ -35,6 +35,7 @@ test("lead identity placeholders and status display", () => {
 test("workflow section order and next actions are explicit only", () => {
   assert.deepEqual(WORKFLOW_SECTIONS, [
     "header",
+    "workspace",
     "intelligence",
     "productivity",
     "contact",

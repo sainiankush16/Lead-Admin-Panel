@@ -189,7 +189,8 @@ test("Lead Detail wires intelligence without AI backend or fake scoring", () => 
   );
   const search = fs.readFileSync(path.join(__dirname, "mobile/app/(app)/search.tsx"), "utf8");
 
-  assert.equal(WORKFLOW_SECTIONS[1], "intelligence");
+  assert.equal(WORKFLOW_SECTIONS[1], "workspace");
+  assert.equal(WORKFLOW_SECTIONS[2], "intelligence");
   assert.match(detail, /LeadIntelligenceSummary/);
   assert.match(detail, /LeadSmartNextAction/);
   assert.match(detail, /LeadFollowUpSection/);

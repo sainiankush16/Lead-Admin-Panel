@@ -23,6 +23,7 @@ import { LeadNextActions } from "@/components/LeadNextActions";
 import { LeadRemarksSection } from "@/components/LeadRemarksSection";
 import { LeadSmartNextAction } from "@/components/LeadSmartNextAction";
 import { LeadTimelineSection } from "@/components/LeadTimelineSection";
+import { LeadWorkThisLead } from "@/components/LeadWorkThisLead";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
@@ -551,6 +552,19 @@ export default function LeadDetailScreen() {
                 phone={detail.phone}
                 email={detail.email}
                 status={detail.status}
+              />
+            </View>
+
+            <View onLayout={event => rememberSection("workspace", event)}>
+              <LeadWorkThisLead
+                projectName={detail.projectName}
+                status={detail.status}
+                telHref={detail.telHref}
+                mailtoHref={detail.mailtoHref}
+                timelineEvents={timelineEvents}
+                remarks={remarks}
+                onReview={() => jumpToSection("productivity")}
+                onJumpToRemarks={() => jumpToSection("remarks")}
               />
             </View>
 

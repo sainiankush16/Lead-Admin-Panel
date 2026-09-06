@@ -111,6 +111,11 @@ export default function DashboardScreen() {
     router.push(item.detailHref);
   }
 
+  function openWorkNextLead(item: ActionCenterItem) {
+    if (!item?.detailHref) return;
+    router.push(item.detailHref);
+  }
+
   function openActionViewAll(status: string | null) {
     if (!summary || !status) return;
     const target = resolvePipelineLeadTarget(summary, status);
@@ -201,6 +206,7 @@ export default function DashboardScreen() {
                 onFilterChange={setActionFilter}
                 onOpenLead={openActionLead}
                 onViewAll={openActionViewAll}
+                onWorkNext={openWorkNextLead}
               />
             ) : null}
 

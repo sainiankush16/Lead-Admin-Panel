@@ -169,6 +169,8 @@ function getActionCenterSummary(projectLeads, options = {}) {
     filter,
     limit: options.limit ?? ACTION_CENTER_VISIBLE_LIMIT
   });
+  // Work Next always uses overall priority (All), independent of list filter.
+  const workNext = getWorkNextLead(projectLeads, { filter: "All" });
 
   return {
     counts,
@@ -181,7 +183,49 @@ function getActionCenterSummary(projectLeads, options = {}) {
     empty: counts.total <= 0,
     emptyLabel: "No leads currently require action",
     inventsScore: false,
-    filterOptions: ["All", ...ACTION_CENTER_STATUSES]
+    filterOptions: ["All", ...ACTION_CENTER_STATUSES],
+    workNext
+  };
+}
+
+/**
+ * Deterministic next lead to work from Action Center data.
+ * Uses existing priority ordering. Does not mutate leads or call APIs.
+ */
+function getWorkNextLead(projectLeadsOrItems, options = {}) {
+  let items;
+  const source = Array.isArray(projectLeadsOrItems) ? projectLeadsOrItems : [];
+  if (
+    source.length > 0 &&
+    source[0] &&
+    typeof source[0] === "object" &&
+    Number.isFinite(Number(source[0].priority)) &&
+    Number.isSafeInteger(Number(source[0].rowNumber))
+  ) {
+    items = source.slice();
+  } else {
+    items = collectActionCenterItems(source);
+  }
+
+  const filtered = filterActionCenterItems(items, options.filter || "All");
+  if (!filtered.length) return null;
+
+  const lead = filtered[0];
+  return {
+    projectId: Number(lead.projectId),
+    projectName: String(lead.projectName || "Project"),
+    rowNumber: Number(lead.rowNumber),
+    name: String(lead.name || "Unnamed Lead"),
+    phone: String(lead.phone || ""),
+    email: String(lead.email || ""),
+    status: lead.status,
+    priority: Number(lead.priority),
+    phoneAvailable: Boolean(lead.phoneAvailable),
+    emailAvailable: Boolean(lead.emailAvailable),
+    contactLabel: String(lead.contactLabel || "Contact unavailable"),
+    detailHref: String(lead.detailHref || `/projects/${lead.projectId}/lead/${lead.rowNumber}`),
+    changesStatus: false,
+    sendsCommunication: false
   };
 }
 
@@ -203,5 +247,6 @@ module.exports = {
   filterActionCenterItems,
   getActionCenterItems,
   getActionCenterSummary,
+  getWorkNextLead,
   inventsActionScore
 };

@@ -13,6 +13,7 @@ interface ActionCenterSectionProps {
   onFilterChange: (filter: string) => void;
   onOpenLead: (item: ActionCenterItem) => void;
   onViewAll: (status: string | null) => void;
+  onWorkNext?: (item: ActionCenterItem) => void;
 }
 
 export function ActionCenterSection({
@@ -20,9 +21,11 @@ export function ActionCenterSection({
   filter,
   onFilterChange,
   onOpenLead,
-  onViewAll
+  onViewAll,
+  onWorkNext
 }: ActionCenterSectionProps) {
   const counts = summary.counts;
+  const workNext = summary.workNext;
 
   return (
     <View style={styles.wrap} accessibilityLabel="Action Center">
@@ -30,6 +33,11 @@ export function ActionCenterSection({
       <Text style={styles.priority} accessibilityLabel={summary.priority.label}>
         {summary.priority.label}
       </Text>
+      {!summary.empty ? (
+        <Text style={styles.attentionCount} accessibilityLabel={`${counts.total} leads requiring attention`}>
+          {counts.total} {counts.total === 1 ? "lead" : "leads"} requiring attention
+        </Text>
+      ) : null}
 
       <Text style={styles.needsTitle}>Needs Attention</Text>
       <View style={styles.countRow}>
@@ -39,6 +47,20 @@ export function ActionCenterSection({
           </Text>
         ))}
       </View>
+
+      {workNext && onWorkNext ? (
+        <Pressable
+          style={styles.workNextBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`Work Next Lead: ${workNext.name}, ${workNext.status}, ${workNext.projectName}`}
+          onPress={() => onWorkNext(workNext)}
+        >
+          <Text style={styles.workNextBtnText}>Work Next Lead</Text>
+          <Text style={styles.workNextHint}>
+            {workNext.status} · {workNext.name} · {workNext.projectName}
+          </Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.filters}>
         {summary.filterOptions.map(option => {
@@ -71,7 +93,7 @@ export function ActionCenterSection({
             accessibilityLabel={`${item.status}. ${item.name}. ${item.projectName}. ${item.contactLabel}`}
             onPress={() => onOpenLead(item)}
           >
-            <Text style={styles.itemStatus}>{item.status}</Text>
+            <Text style={styles.itemStatus}>{String(item.status).toUpperCase()}</Text>
             <Text style={styles.itemName}>{item.name}</Text>
             <Text style={styles.itemProject}>{item.projectName}</Text>
             <Text style={styles.itemContact}>{item.contactLabel}</Text>
@@ -125,6 +147,30 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 14,
     fontWeight: "700"
+  },
+  attentionCount: {
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: "600"
+  },
+  workNextBtn: {
+    marginTop: 4,
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 2
+  },
+  workNextBtnText: {
+    color: colors.bg,
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  workNextHint: {
+    color: colors.bg,
+    opacity: 0.85,
+    fontSize: 12,
+    fontWeight: "600"
   },
   needsTitle: {
     marginTop: 4,

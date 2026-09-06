@@ -176,8 +176,9 @@ test("Lead Detail wires productivity without notifications or backend changes", 
   const search = fs.readFileSync(path.join(__dirname, "mobile/app/(app)/search.tsx"), "utf8");
 
   assert.deepEqual(WORKFLOW_SECTIONS[0], "header");
-  assert.deepEqual(WORKFLOW_SECTIONS[1], "intelligence");
-  assert.deepEqual(WORKFLOW_SECTIONS[2], "productivity");
+  assert.deepEqual(WORKFLOW_SECTIONS[1], "workspace");
+  assert.deepEqual(WORKFLOW_SECTIONS[2], "intelligence");
+  assert.deepEqual(WORKFLOW_SECTIONS[3], "productivity");
 
   assert.match(detail, /LeadSmartNextAction/);
   assert.match(detail, /onSelectQuickStatus/);

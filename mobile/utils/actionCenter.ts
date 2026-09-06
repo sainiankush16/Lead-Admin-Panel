@@ -21,6 +21,8 @@ export interface ActionCenterItem {
   emailAvailable: boolean;
   contactLabel: string;
   detailHref: string;
+  changesStatus?: boolean;
+  sendsCommunication?: boolean;
 }
 
 export interface ActionCenterCounts {
@@ -50,6 +52,7 @@ export interface ActionCenterSummary {
   emptyLabel: string;
   inventsScore: boolean;
   filterOptions: string[];
+  workNext: ActionCenterItem | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -93,5 +96,10 @@ export const getActionCenterSummary = core.getActionCenterSummary as (
   projectLeads: ProjectLeadsResponse[] | null | undefined,
   options?: { filter?: string; limit?: number }
 ) => ActionCenterSummary;
+
+export const getWorkNextLead = core.getWorkNextLead as (
+  projectLeadsOrItems: ProjectLeadsResponse[] | ActionCenterItem[] | null | undefined,
+  options?: { filter?: string }
+) => ActionCenterItem | null;
 
 export const inventsActionScore = core.inventsActionScore as () => boolean;
