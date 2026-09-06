@@ -41,7 +41,7 @@ test("query validation matches backend minimum", () => {
 });
 
 test("result count formatting and empty handling", () => {
-  assert.equal(formatSearchResultCount(0), "No leads found.");
+  assert.equal(formatSearchResultCount(0), "No matching leads");
   assert.equal(formatSearchResultCount(1), "1 lead found");
   assert.equal(formatSearchResultCount(12), "12 leads found");
 });

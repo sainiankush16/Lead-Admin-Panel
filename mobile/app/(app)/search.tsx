@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
   Keyboard,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,11 +14,18 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadSearchResultCard } from "@/components/LeadSearchResultCard";
+import { LEAD_STATUSES } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { api, ApiClientError } from "@/services/api";
+import type { Project } from "@/types";
 import {
+  ALL_PROJECTS,
+  ALL_STATUSES,
+  applySearchFilters,
   applySuccessfulSearch,
+  areSearchFiltersActive,
   canSubmitSearch,
+  clearSearchFilters,
   clearSearchState,
   createInitialSearchState,
   formatSearchResultCount,
@@ -29,12 +37,36 @@ import {
   type SearchUiState
 } from "@/utils/globalSearch";
 
+const STATUS_FILTERS = [ALL_STATUSES, ...LEAD_STATUSES, "Unknown"] as const;
+
 export default function SearchScreen() {
   const router = useRouter();
   const [state, setState] = useState<SearchUiState>(createInitialSearchState());
   const [localValidation, setLocalValidation] = useState<string | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   const submitEnabled = canSubmitSearch({ query: state.query, searching: state.searching });
+  const filtersActive = areSearchFiltersActive(state);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const response = await api.getProjects();
+      setProjects(Array.isArray(response.projects) ? response.projects : []);
+      setProjectsError(null);
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 401) {
+        setProjectsError("Session expired. Please login again.");
+      } else {
+        setProjectsError("Unable to load projects for filtering.");
+      }
+      setProjects([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
 
   async function runSearch() {
     const validated = validateSearchDraft(state.query);
@@ -62,6 +94,7 @@ export default function SearchScreen() {
         ...prev,
         searching: false,
         error: mapped.message,
+        allResults: [],
         results: [],
         count: 0,
         hasSearched: true,
@@ -70,15 +103,38 @@ export default function SearchScreen() {
     }
   }
 
-  function onClear() {
+  function onClearQuery() {
     setLocalValidation(null);
-    setState(clearSearchState());
+    setState(prev => ({
+      ...clearSearchState(),
+      projectFilter: prev.projectFilter,
+      statusFilter: prev.statusFilter
+    }));
+  }
+
+  function onClearFilters() {
+    setState(prev => clearSearchFilters(prev));
+  }
+
+  function setProjectFilter(projectFilter: "all" | number) {
+    setState(prev => applySearchFilters(prev, { projectFilter }));
+  }
+
+  function setStatusFilter(statusFilter: string) {
+    setState(prev => applySearchFilters(prev, { statusFilter }));
   }
 
   function openLead(item: MappedSearchResult) {
     if (!item.href) return;
-    router.push(item.href as `/projects/${number}/lead/${number}`);
+    router.push(item.href);
   }
+
+  const selectedProjectLabel =
+    state.projectFilter === ALL_PROJECTS
+      ? "All Projects"
+      : projects.find(p => p.id === state.projectFilter)?.name || `Project ${state.projectFilter}`;
+  const selectedStatusLabel =
+    state.statusFilter === ALL_STATUSES ? "All Statuses" : String(state.statusFilter);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -110,9 +166,9 @@ export default function SearchScreen() {
             <Pressable
               style={styles.clearBtn}
               accessibilityRole="button"
-              accessibilityLabel="Clear search"
+              accessibilityLabel="Clear search query"
               disabled={state.searching}
-              onPress={onClear}
+              onPress={onClearQuery}
             >
               <Text style={styles.clearText}>Clear</Text>
             </Pressable>
@@ -139,6 +195,82 @@ export default function SearchScreen() {
           )}
         </Pressable>
 
+        <Text style={styles.filterLabel}>Project: {selectedProjectLabel}</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          <Pressable
+            style={[styles.chip, state.projectFilter === ALL_PROJECTS && styles.chipActive]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: state.projectFilter === ALL_PROJECTS }}
+            accessibilityLabel="Filter All Projects"
+            onPress={() => setProjectFilter(ALL_PROJECTS)}
+          >
+            <Text
+              style={[
+                styles.chipText,
+                state.projectFilter === ALL_PROJECTS && styles.chipTextActive
+              ]}
+            >
+              All Projects
+            </Text>
+          </Pressable>
+          {projects.map(project => {
+            const active = state.projectFilter === project.id;
+            return (
+              <Pressable
+                key={project.id}
+                style={[styles.chip, active && styles.chipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filter project ${project.name}`}
+                onPress={() => setProjectFilter(project.id)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{project.name}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        <Text style={styles.filterLabel}>Status: {selectedStatusLabel}</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          {STATUS_FILTERS.map(option => {
+            const value = option === ALL_STATUSES ? ALL_STATUSES : option;
+            const label = option === ALL_STATUSES ? "All Statuses" : option;
+            const active = state.statusFilter === value;
+            return (
+              <Pressable
+                key={label}
+                style={[styles.chip, active && styles.chipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Filter status ${label}`}
+                onPress={() => setStatusFilter(value)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {filtersActive ? (
+          <Pressable
+            style={styles.clearFilters}
+            accessibilityRole="button"
+            accessibilityLabel="Clear filters"
+            onPress={onClearFilters}
+          >
+            <Text style={styles.clearFiltersText}>Clear Filters</Text>
+          </Pressable>
+        ) : null}
+
+        {projectsError ? <Text style={styles.error}>{projectsError}</Text> : null}
         {localValidation ? <Text style={styles.error}>{localValidation}</Text> : null}
         {state.error ? (
           <View style={styles.errorBlock}>
@@ -167,7 +299,8 @@ export default function SearchScreen() {
       {!state.searching && !state.hasSearched ? (
         <View style={styles.center}>
           <Text style={styles.muted}>
-            Search your leads by name, phone, email, or other lead information.
+            Search your leads by name, phone, email, or other lead information. Then filter by
+            project or Lead Status.
           </Text>
         </View>
       ) : null}
@@ -186,7 +319,7 @@ export default function SearchScreen() {
               ) : null}
               {state.count === 0 ? (
                 <Text style={styles.muted}>
-                  Try a different name, phone number, email, or keyword.
+                  Try a different name, phone number, email, keyword, or filter.
                 </Text>
               ) : null}
             </View>
@@ -234,6 +367,30 @@ const styles = StyleSheet.create({
   searchBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
   searchingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   disabled: { opacity: 0.4 },
+  filterLabel: {
+    marginTop: 14,
+    marginBottom: 8,
+    color: colors.textSoft,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  filterRow: { gap: 8, paddingBottom: 4 },
+  chip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.card
+  },
+  chipActive: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent
+  },
+  chipText: { color: colors.textSoft, fontSize: 12, fontWeight: "600" },
+  chipTextActive: { color: colors.bg },
+  clearFilters: { marginTop: 10, alignSelf: "flex-start" },
+  clearFiltersText: { color: colors.accent, fontWeight: "700", fontSize: 13 },
   error: { marginTop: 10, color: colors.danger, fontSize: 13 },
   errorBlock: { marginTop: 4, gap: 8 },
   retryBtn: {

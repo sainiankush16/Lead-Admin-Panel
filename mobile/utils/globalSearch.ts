@@ -1,10 +1,14 @@
 import type { GlobalSearchResponse, SearchResult } from "@/types";
+import type { LeadStatusValue } from "@/constants/leadStatus";
 
 // Shared pure logic (also covered by Node tests).
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const core = require("./globalSearchCore.js") as {
   MIN_QUERY_LENGTH: number;
   MAX_QUERY_LENGTH: number;
+  ALL_PROJECTS: "all";
+  ALL_STATUSES: "all";
+  LEAD_STATUSES: readonly LeadStatusValue[];
   normalizeSearchQuery: (value: unknown) => string;
   validateSearchDraft: (value: unknown) => { ok: true; value: string } | { ok: false; error: string };
   canSubmitSearch: (args: { query: string; searching: boolean }) => boolean;
@@ -21,6 +25,15 @@ const core = require("./globalSearchCore.js") as {
     message: string;
     clearAuth: boolean;
   };
+  normalizeProjectFilter: (value: unknown) => "all" | number;
+  normalizeStatusFilter: (value: unknown) => "all" | string;
+  filterSearchResults: (
+    results: MappedSearchResult[],
+    filters?: { projectFilter?: unknown; statusFilter?: unknown }
+  ) => MappedSearchResult[];
+  areSearchFiltersActive: (filters?: { projectFilter?: unknown; statusFilter?: unknown }) => boolean;
+  applySearchFilters: (state: SearchUiState, patch?: Partial<SearchUiState>) => SearchUiState;
+  clearSearchFilters: (state: SearchUiState) => SearchUiState;
   createInitialSearchState: () => SearchUiState;
   applySuccessfulSearch: (
     state: SearchUiState,
@@ -28,6 +41,7 @@ const core = require("./globalSearchCore.js") as {
     submittedQuery: string
   ) => SearchUiState;
   clearSearchState: () => SearchUiState;
+  globalSearchSupportsEmptyQuery: () => boolean;
 };
 
 export interface MappedSearchResult {
@@ -46,16 +60,21 @@ export interface MappedSearchResult {
 export interface SearchUiState {
   query: string;
   submittedQuery: string | null;
+  allResults: MappedSearchResult[];
   results: MappedSearchResult[];
   count: number;
   searching: boolean;
   error: string | null;
   partialErrors: boolean;
   hasSearched: boolean;
+  projectFilter: "all" | number;
+  statusFilter: "all" | string;
 }
 
 export const MIN_QUERY_LENGTH = core.MIN_QUERY_LENGTH;
 export const MAX_QUERY_LENGTH = core.MAX_QUERY_LENGTH;
+export const ALL_PROJECTS = core.ALL_PROJECTS;
+export const ALL_STATUSES = core.ALL_STATUSES;
 export const normalizeSearchQuery = core.normalizeSearchQuery;
 export const validateSearchDraft = core.validateSearchDraft;
 export const canSubmitSearch = core.canSubmitSearch;
@@ -69,6 +88,13 @@ export const mapSearchResults = core.mapSearchResults;
 export const hasPartialSheetErrors = core.hasPartialSheetErrors;
 export const partialSheetErrorMessage = core.partialSheetErrorMessage;
 export const mapSearchError = core.mapSearchError;
+export const normalizeProjectFilter = core.normalizeProjectFilter;
+export const normalizeStatusFilter = core.normalizeStatusFilter;
+export const filterSearchResults = core.filterSearchResults;
+export const areSearchFiltersActive = core.areSearchFiltersActive;
+export const applySearchFilters = core.applySearchFilters;
+export const clearSearchFilters = core.clearSearchFilters;
 export const createInitialSearchState = core.createInitialSearchState;
 export const applySuccessfulSearch = core.applySuccessfulSearch;
 export const clearSearchState = core.clearSearchState;
+export const globalSearchSupportsEmptyQuery = core.globalSearchSupportsEmptyQuery;

@@ -1,8 +1,12 @@
 "use strict";
 
+const { classifyLeadStatus, LEAD_STATUSES } = require("./dashboardSummaryCore");
+
 /** Matches lead-search.js */
 const MIN_QUERY_LENGTH = 2;
 const MAX_QUERY_LENGTH = 120;
+const ALL_PROJECTS = "all";
+const ALL_STATUSES = "all";
 
 function normalizeSearchQuery(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -26,7 +30,7 @@ function canSubmitSearch({ query, searching }) {
 
 function formatSearchResultCount(count) {
   const n = Number(count);
-  if (!Number.isFinite(n) || n <= 0) return "No leads found.";
+  if (!Number.isFinite(n) || n <= 0) return "No matching leads";
   if (n === 1) return "1 lead found";
   return `${n} leads found`;
 }
@@ -42,9 +46,7 @@ function displayFieldOrDash(value) {
 }
 
 function displayLeadStatus(status) {
-  if (status == null) return "Unknown";
-  const text = String(status).trim();
-  return text || "Unknown";
+  return classifyLeadStatus(status);
 }
 
 function displayProjectName(result) {
@@ -110,41 +112,124 @@ function mapSearchError(err) {
   return { message: "Unable to search leads.", clearAuth: false };
 }
 
+function normalizeProjectFilter(value) {
+  if (value == null || value === "" || value === ALL_PROJECTS || value === "All Projects") {
+    return ALL_PROJECTS;
+  }
+  const id = Number(value);
+  if (!Number.isSafeInteger(id) || id <= 0) return ALL_PROJECTS;
+  return id;
+}
+
+function normalizeStatusFilter(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === ALL_STATUSES || text === "All Statuses" || text === "All") {
+    return ALL_STATUSES;
+  }
+  if (text === "Unknown") return "Unknown";
+  if (LEAD_STATUSES.includes(text)) return text;
+  return ALL_STATUSES;
+}
+
+function filterSearchResults(results, { projectFilter = ALL_PROJECTS, statusFilter = ALL_STATUSES } = {}) {
+  const list = Array.isArray(results) ? results : [];
+  const projectId = normalizeProjectFilter(projectFilter);
+  const status = normalizeStatusFilter(statusFilter);
+  return list.filter(item => {
+    if (projectId !== ALL_PROJECTS && Number(item.projectId) !== Number(projectId)) {
+      return false;
+    }
+    if (status !== ALL_STATUSES) {
+      const itemStatus = classifyLeadStatus(item.status);
+      if (itemStatus !== status) return false;
+    }
+    return true;
+  });
+}
+
+function areSearchFiltersActive({ projectFilter, statusFilter } = {}) {
+  return (
+    normalizeProjectFilter(projectFilter) !== ALL_PROJECTS ||
+    normalizeStatusFilter(statusFilter) !== ALL_STATUSES
+  );
+}
+
+function applySearchFilters(state, patch = {}) {
+  const next = {
+    ...state,
+    ...patch
+  };
+  next.projectFilter = normalizeProjectFilter(next.projectFilter);
+  next.statusFilter = normalizeStatusFilter(next.statusFilter);
+  const allResults = Array.isArray(next.allResults) ? next.allResults : [];
+  const filtered = filterSearchResults(allResults, {
+    projectFilter: next.projectFilter,
+    statusFilter: next.statusFilter
+  });
+  return {
+    ...next,
+    results: filtered,
+    count: filtered.length
+  };
+}
+
+function clearSearchFilters(state) {
+  return applySearchFilters(state, {
+    projectFilter: ALL_PROJECTS,
+    statusFilter: ALL_STATUSES
+  });
+}
+
 function createInitialSearchState() {
   return {
     query: "",
     submittedQuery: null,
+    allResults: [],
     results: [],
     count: 0,
     searching: false,
     error: null,
     partialErrors: false,
-    hasSearched: false
+    hasSearched: false,
+    projectFilter: ALL_PROJECTS,
+    statusFilter: ALL_STATUSES
   };
 }
 
 function applySuccessfulSearch(state, payload, submittedQuery) {
   const mapped = mapSearchResults(payload);
-  const count = Number.isFinite(Number(payload?.count)) ? Number(payload.count) : mapped.length;
-  return {
-    ...state,
-    submittedQuery,
-    results: mapped,
-    count,
-    searching: false,
-    error: null,
-    partialErrors: hasPartialSheetErrors(payload),
-    hasSearched: true
-  };
+  return applySearchFilters(
+    {
+      ...state,
+      submittedQuery,
+      allResults: mapped,
+      searching: false,
+      error: null,
+      partialErrors: hasPartialSheetErrors(payload),
+      hasSearched: true
+    },
+    {
+      projectFilter: state?.projectFilter,
+      statusFilter: state?.statusFilter
+    }
+  );
 }
 
 function clearSearchState() {
   return createInitialSearchState();
 }
 
+/** Global search API requires a non-empty query (min 2 chars). */
+function globalSearchSupportsEmptyQuery() {
+  return false;
+}
+
 module.exports = {
   MIN_QUERY_LENGTH,
   MAX_QUERY_LENGTH,
+  ALL_PROJECTS,
+  ALL_STATUSES,
+  LEAD_STATUSES,
   normalizeSearchQuery,
   validateSearchDraft,
   canSubmitSearch,
@@ -158,7 +243,14 @@ module.exports = {
   hasPartialSheetErrors,
   partialSheetErrorMessage,
   mapSearchError,
+  normalizeProjectFilter,
+  normalizeStatusFilter,
+  filterSearchResults,
+  areSearchFiltersActive,
+  applySearchFilters,
+  clearSearchFilters,
   createInitialSearchState,
   applySuccessfulSearch,
-  clearSearchState
+  clearSearchState,
+  globalSearchSupportsEmptyQuery
 };
