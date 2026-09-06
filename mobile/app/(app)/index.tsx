@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { ActionCenterSection } from "@/components/ActionCenterSection";
 import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
+import { ProductivityOverviewCard } from "@/components/ProductivityOverviewCard";
 import { BRAND_NAME } from "@/constants/branding";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
@@ -32,6 +33,7 @@ import {
   type DashboardSummary
 } from "@/utils/dashboardSummary";
 import { resolvePipelineLeadTarget } from "@/utils/pipeline";
+import { getProductivityAnalytics } from "@/utils/productivityAnalytics";
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat("en-IN").format(value);
@@ -82,6 +84,11 @@ export default function DashboardScreen() {
   const actionCenter = useMemo(
     () => getActionCenterSummary(projectLeads, { filter: actionFilter, limit: 5 }),
     [projectLeads, actionFilter]
+  );
+
+  const productivity = useMemo(
+    () => getProductivityAnalytics(summary),
+    [summary]
   );
 
   const displayName = user?.name?.trim() || user?.loginId || "there";
@@ -198,6 +205,8 @@ export default function DashboardScreen() {
                 showHealth
               />
             ) : null}
+
+            {summary.hasLeads ? <ProductivityOverviewCard analytics={productivity} /> : null}
 
             {summary.hasLeads ? (
               <ActionCenterSection

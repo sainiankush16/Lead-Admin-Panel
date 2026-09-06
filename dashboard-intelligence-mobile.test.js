@@ -138,8 +138,10 @@ test("Dashboard and Lead List wire actionable navigation without new APIs", () =
   assert.match(dashboard, /resolveActionableLeadTarget/);
   assert.match(dashboard, /buildLeadListPath/);
   assert.match(dashboard, /openProjectLeads/);
+  assert.match(dashboard, /getProductivityAnalytics|ProductivityOverviewCard/);
   assert.doesNotMatch(dashboard, /CHATURX|ChaturX|Ankush CRM/);
-  assert.doesNotMatch(dashboard, /chart|analytics|firebase|expo-notifications/i);
+  assert.doesNotMatch(dashboard, /chart\.js|victory|recharts|firebase|expo-notifications/i);
+  assert.doesNotMatch(dashboard, /conversionProbability|AI Forecast|Expected Revenue/i);
 
   assert.match(leadList, /normalizeLeadListStatusParam/);
   assert.match(leadList, /Status: \{status\}/);
