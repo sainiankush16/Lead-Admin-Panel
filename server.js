@@ -8,7 +8,7 @@ const session = require("express-session");
 const db = require("./db");
 const SQLiteSessionStore = require("./session-store");
 const { getKey, encrypt, decrypt } = require("./crypto");
-const { csrfTokensMatch } = require("./api-guards");
+const { csrfTokensMatch, shouldBypassBrowserCsrf } = require("./api-guards");
 const {
   ROLES,
   sanitizeAppUser,
@@ -33,7 +33,8 @@ const {
   buildSessionOptions,
   buildSessionCookieOptions,
   isValidOauthCallback,
-  oauthStatesMatch
+  oauthStatesMatch,
+  SESSION_COOKIE_MAX_AGE_MS
 } = require("./session-config");
 const {
   buildOauthStartDiagnostics,
@@ -43,9 +44,24 @@ const {
   onResponseHeaders
 } = require("./oauth-diagnostics");
 const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-data");
-const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
+const {
+  planLeadStatusUpdate,
+  planLeadStatusColumnCreate,
+  decideLeadStatusWrite
+} = require("./lead-status-ops");
 const { buildSyncSnapshot, compareSheetToSnapshot, syncInProgressGuard } = require("./sync-snapshot");
 const { searchAcrossAuthorizedProjects } = require("./lead-search");
+const {
+  extractBearerToken,
+  ensureMobileSessionTokenSchema,
+  issueMobileSessionToken,
+  lookupMobileSessionToken,
+  deleteMobileSessionToken,
+  deleteMobileSessionTokensForSid,
+  defaultMobileTokenExpiry,
+  sessionStoreGet,
+  sessionStoreDestroy
+} = require("./mobile-auth");
 const {
   TIMELINE_EVENT_TYPES,
   leadIdFromRowNumber,
@@ -126,6 +142,9 @@ app.use("/api", (req, res, next) => {
   res.set("Cache-Control", "no-store");
   next();
 });
+app.use("/api", (req, res, next) => {
+  resolveMobileBearerAuth(req, res, next);
+});
 app.use(express.static(path.join(__dirname, "public")));
 
 function randomValue() {
@@ -179,7 +198,69 @@ async function requireAdmin(req, res, next) {
   }
 }
 
+/**
+ * Additive mobile bearer auth. Cookie sessions remain the web path.
+ * If Authorization: Bearer is present, it must resolve or the request is 401.
+ * mobileBearerAuth is set ONLY after token + session + currentAppUser succeed.
+ */
+async function resolveMobileBearerAuth(req, res, next) {
+  try {
+    const rawToken = extractBearerToken(req.get("authorization"));
+    if (!rawToken) return next();
+
+    const found = await lookupMobileSessionToken(db, rawToken, process.env.SESSION_SECRET);
+    if (found.status === "expired") {
+      await deleteMobileSessionToken(db, found.tokenHash);
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+    if (found.status !== "ok") {
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+
+    const sess = await sessionStoreGet(sessionStore, found.row.sid);
+    if (!sess || !sess.userId) {
+      await deleteMobileSessionToken(db, found.tokenHash);
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+
+    req.session.userId = Number(sess.userId);
+    req.session.role = sess.role;
+    req.session.sessionVersion = Number(sess.sessionVersion || 0);
+    if (sess.csrfToken) req.session.csrfToken = sess.csrfToken;
+
+    const user = await currentAppUser(req);
+    if (!user) {
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+
+    req.user = user;
+    req.mobileBearerAuth = true;
+    req.mobileTokenHash = found.tokenHash;
+    req.mobileBoundSid = String(found.row.sid);
+
+    // Do not persist bearer-hydrated credentials onto a new anonymous cookie session.
+    if (req.sessionID !== req.mobileBoundSid) {
+      req.session.save = callback => {
+        if (typeof callback === "function") process.nextTick(callback);
+      };
+      const originalSetHeader = res.setHeader.bind(res);
+      res.setHeader = (name, value) => {
+        if (String(name).toLowerCase() === "set-cookie") return res;
+        return originalSetHeader(name, value);
+      };
+    }
+
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
 function csrfProtection(req, res, next) {
+  // Browser cookie requests keep CSRF. Valid mobile bearer auth is CSRF-exempt.
+  if (shouldBypassBrowserCsrf(req)) {
+    return next();
+  }
   if (!csrfTokensMatch(req.session.csrfToken, req.get("x-csrf-token"))) {
     return res.status(403).json({ error: "Invalid CSRF token." });
   }
@@ -556,6 +637,70 @@ app.post("/api/auth/logout", requireAuth, csrfProtection, (req, res, next) => {
   });
 });
 
+/* -------------------- MOBILE AUTH (additive; web cookie auth unchanged) -------------------- */
+
+app.post("/api/mobile/auth/login", async (req, res, next) => {
+  try {
+    const result = await authenticateAppUser(db, req.body?.loginId, req.body?.password);
+    if (!result.ok) return res.status(401).json({ error: result.error });
+
+    await establishAppSession(req, result.user);
+    const expiresAt = defaultMobileTokenExpiry();
+    const issued = await issueMobileSessionToken(db, {
+      sid: req.sessionID,
+      userId: result.user.id,
+      secret: process.env.SESSION_SECRET,
+      expiresAt
+    });
+
+    res.json({
+      user: sanitizeAppUser(result.user),
+      sessionToken: issued.rawToken,
+      expiresAt: new Date(expiresAt).toISOString()
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/mobile/auth/me", requireAuth, async (req, res, next) => {
+  try {
+    if (req.mobileBearerAuth !== true) {
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+    res.json({
+      authenticated: true,
+      user: sanitizeAppUser(req.user)
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/mobile/auth/logout", requireAuth, async (req, res, next) => {
+  try {
+    if (req.mobileBearerAuth !== true) {
+      return res.status(401).json({ error: "Not authenticated." });
+    }
+
+    const tokenHash = req.mobileTokenHash;
+    const sid = req.mobileBoundSid || req.sessionID;
+
+    await deleteMobileSessionToken(db, tokenHash);
+    if (sid) {
+      await deleteMobileSessionTokensForSid(db, sid);
+      await sessionStoreDestroy(sessionStore, sid);
+    }
+
+    req.session.destroy(err => {
+      if (err) return next(err);
+      res.json({ ok: true });
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 /* -------------------- GOOGLE SHEETS (admin) -------------------- */
 
 app.get("/api/sheets", requireAdmin, async (req, res) => {
@@ -798,33 +943,56 @@ app.patch("/api/projects/:id/leads/:rowNumber/status", requireAuth, csrfProtecti
     });
     if (planned.error) return res.status(planned.statusCode).json({ error: planned.error });
 
-    const { spreadsheetId, sheetTitle, columnIndex, rowNumber, status } = planned.value;
-    const statusCol = findLeadStatusColumn(sheetData.columns || []);
-    const leadIndex = (sheetData.rowNumbers || []).indexOf(rowNumber);
-    const previousStatus = statusCol && leadIndex >= 0
-      ? (String(sheetData.leads[leadIndex]?.[statusCol] ?? "").trim() || "New")
-      : "New";
+    const decision = decideLeadStatusWrite({ sheetData, plannedValue: planned.value });
+    const { rowNumber, status } = decision;
 
+    // Same status: no Google Sheets write and no STATUS_CHANGED timeline event.
+    if (decision.unchanged) {
+      return res.json({
+        ok: true,
+        unchanged: true,
+        rowNumber,
+        status,
+        project: await refreshProjectLeads(connection, project)
+      });
+    }
+
+    const { spreadsheetId, sheetTitle, columnIndex } = decision.write;
+    const previousStatus = decision.previousStatus;
+
+    // Write to Google Sheets first. Timeline only after a successful write.
     await writeLeadStatus(client, spreadsheetId, sheetTitle, columnIndex, rowNumber, status);
 
     const leadId = leadIdFromRowNumber(rowNumber);
-    if (leadId && previousStatus !== status) {
-      await recordStatusChangedEvent(db, {
-        projectId: project.id,
-        leadId,
-        fromStatus: previousStatus,
-        toStatus: status,
-        actor: req.user
-      });
+    if (leadId) {
+      try {
+        await recordStatusChangedEvent(db, {
+          projectId: project.id,
+          leadId,
+          fromStatus: previousStatus,
+          toStatus: status,
+          actor: req.user
+        });
+      } catch (timelineErr) {
+        // Sheets already updated — do not invent a false event or roll back Sheets.
+        console.error("STATUS_CHANGED timeline insert failed after Sheets write:", timelineErr?.message || timelineErr);
+        return res.status(500).json({
+          error: "Unable to record status change history.",
+          rowNumber,
+          status
+        });
+      }
     }
 
     res.json({
       ok: true,
+      success: true,
       rowNumber,
       status,
       project: await refreshProjectLeads(connection, project)
     });
   } catch (err) {
+    // Google write failed (or earlier) — no STATUS_CHANGED event was created.
     sendGoogleError(res, "Unable to update lead status", err);
   }
 });
@@ -1098,6 +1266,7 @@ app.use((err, req, res, next) => { // eslint-disable-line no-unused-vars
 
 async function start() {
   await db.ready;
+  await ensureMobileSessionTokenSchema(db);
   await bootstrapAdminUser(db, {
     loginId: ADMIN_LOGIN_ID,
     passwordHash: ADMIN_PASSWORD_HASH

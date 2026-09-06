@@ -1,0 +1,625 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
+import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { LeadRemarksSection } from "@/components/LeadRemarksSection";
+import { LeadTimelineSection } from "@/components/LeadTimelineSection";
+import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
+import { colors } from "@/constants/theme";
+import { useAuth } from "@/hooks/useAuth";
+import { api, ApiClientError } from "@/services/api";
+import type { Remark, TimelineEvent } from "@/types";
+import { buildLeadDetail, type LeadDetailModel } from "@/utils/leadDetail";
+import {
+  leadIdFromRowNumber,
+  mapRemarkMutationError,
+  mapRemarksLoadError
+} from "@/utils/leadRemarks";
+import {
+  applySuccessfulStatusUpdate,
+  canEnableSaveStatus,
+  initialStatusSelection,
+  mapStatusUpdateError,
+  shouldSubmitStatusChange
+} from "@/utils/leadStatusEdit";
+import { mapTimelineLoadError } from "@/utils/leadTimeline";
+import { openCall, openExternalUrl, openWhatsApp } from "@/utils/linking";
+
+function FieldRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.fieldRow}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldValue}>{value}</Text>
+    </View>
+  );
+}
+
+export default function LeadDetailScreen() {
+  const router = useRouter();
+  const { user } = useAuth();
+  const params = useLocalSearchParams<{ projectId: string; rowNumber: string }>();
+  const projectId = Number(params.projectId);
+  const rowNumber = Number(params.rowNumber);
+  const leadId = leadIdFromRowNumber(rowNumber);
+
+  const [detail, setDetail] = useState<LeadDetailModel | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
+
+  const [selectedStatus, setSelectedStatus] = useState<LeadStatusValue | null>(null);
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const [remarks, setRemarks] = useState<Remark[]>([]);
+  const [remarksLoading, setRemarksLoading] = useState(false);
+  const [remarksError, setRemarksError] = useState<string | null>(null);
+  const [remarkBusy, setRemarkBusy] = useState(false);
+  const [remarkMutationError, setRemarkMutationError] = useState<string | null>(null);
+
+  const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+
+  const syncSelectionFromDetail = useCallback((next: LeadDetailModel) => {
+    setSelectedStatus(initialStatusSelection(next.status));
+  }, []);
+
+  const loadRemarks = useCallback(async () => {
+    if (!leadId || !Number.isSafeInteger(projectId) || projectId <= 0) {
+      setRemarks([]);
+      setRemarksError("Lead not found.");
+      return;
+    }
+    setRemarksLoading(true);
+    setRemarksError(null);
+    try {
+      const response = await api.getRemarks(projectId, leadId);
+      setRemarks(Array.isArray(response.remarks) ? response.remarks : []);
+    } catch (err) {
+      const mapped = mapRemarksLoadError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null
+      );
+      setRemarksError(mapped.message);
+      if (mapped.clearAuth) {
+        setError(mapped.message);
+      }
+    } finally {
+      setRemarksLoading(false);
+    }
+  }, [leadId, projectId]);
+
+  const loadTimeline = useCallback(async () => {
+    if (!leadId || !Number.isSafeInteger(projectId) || projectId <= 0) {
+      setTimelineEvents([]);
+      setTimelineError("Lead not found.");
+      return;
+    }
+    setTimelineLoading(true);
+    setTimelineError(null);
+    try {
+      const response = await api.getLeadTimeline(projectId, leadId);
+      setTimelineEvents(Array.isArray(response.events) ? response.events : []);
+    } catch (err) {
+      const mapped = mapTimelineLoadError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null
+      );
+      setTimelineError(mapped.message);
+      if (mapped.clearAuth) {
+        setError(mapped.message);
+      }
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [leadId, projectId]);
+
+  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (!Number.isSafeInteger(projectId) || projectId <= 0 || !leadId) {
+      setError("Lead not found.");
+      setDetail(null);
+      setLoading(false);
+      return;
+    }
+
+    if (mode === "refresh") setRefreshing(true);
+    else setLoading(true);
+    setError(null);
+    setForbidden(false);
+
+    try {
+      const projectData = await api.getProjectLeads(projectId);
+      const result = buildLeadDetail(projectData, rowNumber);
+      if (!result.found) {
+        setDetail(null);
+        setError("Lead not found.");
+        setRemarks([]);
+        setTimelineEvents([]);
+        return;
+      }
+      setDetail(result);
+      syncSelectionFromDetail(result);
+      setStatusError(null);
+      setRemarkMutationError(null);
+      await Promise.all([loadRemarks(), loadTimeline()]);
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 401) {
+        setError("Session expired. Please login again.");
+      } else if (err instanceof ApiClientError && err.status === 403) {
+        setForbidden(true);
+        setError("You don't have access to this project.");
+      } else if (err instanceof ApiClientError && err.status === 404) {
+        setError("Lead not found.");
+      } else if (err instanceof TypeError) {
+        setError("Please check your internet connection.");
+      } else {
+        setError("Unable to load lead.");
+      }
+      if (mode === "initial") setDetail(null);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [projectId, rowNumber, leadId, syncSelectionFromDetail, loadRemarks, loadTimeline]);
+
+  useEffect(() => {
+    void load("initial");
+  }, [load]);
+
+  const saveEnabled =
+    detail != null &&
+    canEnableSaveStatus({
+      displayStatus: detail.status,
+      selectedStatus,
+      saving: savingStatus
+    });
+
+  async function onSaveStatus() {
+    if (!detail || !selectedStatus || savingStatus) return;
+
+    if (!shouldSubmitStatusChange(detail.status, selectedStatus)) {
+      setStatusMessage("No status change.");
+      setStatusError(null);
+      return;
+    }
+
+    setSavingStatus(true);
+    setStatusMessage(null);
+    setStatusError(null);
+
+    const previousDetail = detail;
+    try {
+      const response = await api.updateLeadStatus(projectId, rowNumber, selectedStatus);
+
+      if (response.unchanged) {
+        setStatusMessage("No status change.");
+        syncSelectionFromDetail(previousDetail);
+        return;
+      }
+
+      const nextStatus = (response.status || selectedStatus) as LeadStatusValue;
+      if (response.project) {
+        const refreshed = buildLeadDetail(response.project, rowNumber);
+        if (refreshed.found) {
+          setDetail(refreshed);
+          syncSelectionFromDetail(refreshed);
+        } else {
+          const updated = applySuccessfulStatusUpdate(previousDetail, nextStatus);
+          if (updated) {
+            setDetail(updated);
+            syncSelectionFromDetail(updated);
+          }
+        }
+      } else {
+        const updated = applySuccessfulStatusUpdate(previousDetail, nextStatus);
+        if (updated) {
+          setDetail(updated);
+          syncSelectionFromDetail(updated);
+        }
+      }
+      setStatusMessage("Lead Status updated.");
+      void loadTimeline();
+    } catch (err) {
+      const mapped = mapStatusUpdateError(err instanceof ApiClientError || err instanceof TypeError ? err : null);
+      setStatusError(mapped.message);
+      setDetail(previousDetail);
+      syncSelectionFromDetail(previousDetail);
+      if (mapped.clearAuth) {
+        setError(mapped.message);
+      }
+    } finally {
+      setSavingStatus(false);
+    }
+  }
+
+  async function onAddRemark(body: string) {
+    if (!leadId || remarkBusy) return;
+    setRemarkBusy(true);
+    setRemarkMutationError(null);
+    try {
+      const response = await api.addRemark(projectId, leadId, body);
+      if (Array.isArray(response.remarks)) {
+        setRemarks(response.remarks);
+      } else if (response.remark) {
+        setRemarks(prev => [response.remark, ...prev.filter(item => item.id !== response.remark.id)]);
+      }
+      void loadTimeline();
+    } catch (err) {
+      const mapped = mapRemarkMutationError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null,
+        "add"
+      );
+      setRemarkMutationError(mapped.message);
+      if (mapped.clearAuth) setError(mapped.message);
+      throw err;
+    } finally {
+      setRemarkBusy(false);
+    }
+  }
+
+  async function onEditRemark(remarkId: number, body: string) {
+    if (remarkBusy) return;
+    setRemarkBusy(true);
+    setRemarkMutationError(null);
+    try {
+      const response = await api.updateRemark(projectId, remarkId, body);
+      if (Array.isArray(response.remarks)) {
+        setRemarks(response.remarks);
+      } else if (response.remark) {
+        setRemarks(prev => prev.map(item => (item.id === remarkId ? response.remark : item)));
+      }
+      void loadTimeline();
+    } catch (err) {
+      const mapped = mapRemarkMutationError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null,
+        "edit"
+      );
+      setRemarkMutationError(mapped.message);
+      if (mapped.clearAuth) setError(mapped.message);
+      throw err;
+    } finally {
+      setRemarkBusy(false);
+    }
+  }
+
+  async function onDeleteRemark(remarkId: number) {
+    if (remarkBusy) return;
+    setRemarkBusy(true);
+    setRemarkMutationError(null);
+    try {
+      const response = await api.deleteRemark(projectId, remarkId);
+      if (Array.isArray(response.remarks)) {
+        setRemarks(response.remarks);
+      } else {
+        setRemarks(prev => prev.filter(item => item.id !== remarkId));
+      }
+      void loadTimeline();
+    } catch (err) {
+      const mapped = mapRemarkMutationError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null,
+        "delete"
+      );
+      setRemarkMutationError(mapped.message);
+      if (mapped.clearAuth) setError(mapped.message);
+    } finally {
+      setRemarkBusy(false);
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
+      <Stack.Screen options={{ title: detail?.name || "Lead" }} />
+
+      {loading && !detail ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={colors.accent} size="large" />
+          <Text style={styles.centerText}>Loading lead...</Text>
+        </View>
+      ) : null}
+
+      {error && !loading && !detail ? (
+        <View style={styles.center}>
+          <Text style={styles.error}>{error}</Text>
+          {forbidden ? (
+            <Pressable
+              style={styles.button}
+              accessibilityRole="button"
+              accessibilityLabel="Back to projects"
+              onPress={() => router.replace("/projects")}
+            >
+              <Text style={styles.buttonText}>Back to Projects</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              style={styles.button}
+              accessibilityRole="button"
+              accessibilityLabel="Retry loading lead"
+              onPress={() => {
+                void load("initial");
+              }}
+            >
+              <Text style={styles.buttonText}>Retry</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : null}
+
+      {detail ? (
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          keyboardVerticalOffset={88}
+        >
+          <ScrollView
+            contentContainerStyle={styles.content}
+            keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() => {
+                  void load("refresh");
+                }}
+                tintColor={colors.accent}
+              />
+            }
+          >
+            <Text style={styles.projectName}>{detail.projectName}</Text>
+            <Text style={styles.leadName}>{detail.name}</Text>
+
+            <View style={styles.actions}>
+              <Pressable
+                style={[styles.actionBtn, !detail.telHref && styles.disabled]}
+                disabled={!detail.telHref}
+                accessibilityRole="button"
+                accessibilityLabel={`Call ${detail.name}`}
+                onPress={() => {
+                  void openCall(detail.telHref);
+                }}
+              >
+                <Text style={styles.actionText}>Call</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actionBtn, styles.waBtn, !detail.waHref && styles.disabled]}
+                disabled={!detail.waHref}
+                accessibilityRole="button"
+                accessibilityLabel={`WhatsApp ${detail.name}`}
+                onPress={() => {
+                  void openWhatsApp(detail.waHref);
+                }}
+              >
+                <Text style={[styles.actionText, styles.waText]}>WhatsApp</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Phone</Text>
+              <Text style={styles.sectionValue}>{detail.phone || "—"}</Text>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Email</Text>
+              {detail.mailtoHref ? (
+                <Pressable
+                  accessibilityRole="link"
+                  accessibilityLabel={`Email ${detail.name}`}
+                  onPress={() => {
+                    void openExternalUrl(detail.mailtoHref, "Unable to open mail app.");
+                  }}
+                >
+                  <Text style={styles.linkValue}>{detail.email}</Text>
+                </Pressable>
+              ) : (
+                <Text style={styles.sectionValue}>{detail.email || "—"}</Text>
+              )}
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionLabel}>Lead Status</Text>
+              <Text style={styles.currentStatus}>
+                Current: {detail.status === "Unknown" || !detail.status ? "Unknown" : detail.status}
+              </Text>
+
+              <View style={styles.statusOptions} accessibilityRole="radiogroup">
+                {LEAD_STATUSES.map(status => {
+                  const selected = selectedStatus === status;
+                  return (
+                    <Pressable
+                      key={status}
+                      style={[styles.statusOption, selected && styles.statusOptionSelected]}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected, disabled: savingStatus }}
+                      accessibilityLabel={`Lead Status ${status}`}
+                      disabled={savingStatus}
+                      onPress={() => {
+                        setSelectedStatus(status);
+                        setStatusMessage(null);
+                        setStatusError(null);
+                      }}
+                    >
+                      <Text style={[styles.statusOptionText, selected && styles.statusOptionTextSelected]}>
+                        {status}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Pressable
+                style={[styles.saveBtn, !saveEnabled && styles.saveBtnDisabled]}
+                disabled={!saveEnabled}
+                accessibilityRole="button"
+                accessibilityLabel={savingStatus ? "Saving Lead Status" : "Save Status"}
+                accessibilityState={{ disabled: !saveEnabled, busy: savingStatus }}
+                onPress={() => {
+                  void onSaveStatus();
+                }}
+              >
+                {savingStatus ? (
+                  <View style={styles.saveRow}>
+                    <ActivityIndicator color={colors.bg} />
+                    <Text style={styles.saveBtnText}>Saving...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.saveBtnText}>Save Status</Text>
+                )}
+              </Pressable>
+
+              {statusMessage ? <Text style={styles.statusSuccess}>{statusMessage}</Text> : null}
+              {statusError ? <Text style={styles.statusFail}>{statusError}</Text> : null}
+            </View>
+
+            <Text style={styles.infoTitle}>Lead Information</Text>
+            {detail.fields.length === 0 ? (
+              <Text style={styles.centerText}>No additional fields.</Text>
+            ) : (
+              detail.fields.map(field => (
+                <FieldRow key={field.header} label={field.header} value={field.value} />
+              ))
+            )}
+
+            <LeadRemarksSection
+              remarks={remarks}
+              loading={remarksLoading}
+              error={remarksError}
+              busy={remarkBusy}
+              user={user}
+              onRetry={() => {
+                void loadRemarks();
+              }}
+              onAdd={onAddRemark}
+              onEdit={onEditRemark}
+              onDelete={onDeleteRemark}
+            />
+            {remarkMutationError ? <Text style={styles.statusFail}>{remarkMutationError}</Text> : null}
+
+            <LeadTimelineSection
+              events={timelineEvents}
+              loading={timelineLoading}
+              error={timelineError}
+              onRetry={() => {
+                void loadTimeline();
+              }}
+            />
+
+            {error ? <Text style={styles.inlineError}>{error}</Text> : null}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      ) : null}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  content: { padding: 20, paddingBottom: 48 },
+  projectName: { color: colors.textMuted, fontSize: 13, fontWeight: "600" },
+  leadName: {
+    marginTop: 6,
+    color: colors.text,
+    fontSize: 28,
+    fontWeight: "800"
+  },
+  actions: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+    marginBottom: 18
+  },
+  actionBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#334155"
+  },
+  waBtn: { backgroundColor: colors.accent },
+  disabled: { opacity: 0.35 },
+  actionText: { color: colors.text, fontWeight: "700", fontSize: 15 },
+  waText: { color: colors.bg },
+  section: { marginBottom: 16 },
+  sectionLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 4 },
+  sectionValue: { color: colors.text, fontSize: 16, lineHeight: 22 },
+  linkValue: { color: colors.accent, fontSize: 16, lineHeight: 22, fontWeight: "600" },
+  currentStatus: {
+    color: colors.textSoft,
+    fontSize: 14,
+    marginBottom: 10,
+    fontWeight: "600"
+  },
+  statusOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 14
+  },
+  statusOption: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.card,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 40,
+    justifyContent: "center"
+  },
+  statusOptionSelected: {
+    borderColor: colors.accent,
+    backgroundColor: "#0C4A6E"
+  },
+  statusOptionText: { color: colors.textSoft, fontWeight: "600", fontSize: 13 },
+  statusOptionTextSelected: { color: colors.accent },
+  saveBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16
+  },
+  saveBtnDisabled: { opacity: 0.4 },
+  saveRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  saveBtnText: { color: colors.bg, fontWeight: "800", fontSize: 15 },
+  statusSuccess: { marginTop: 10, color: colors.accent, fontSize: 13, fontWeight: "600" },
+  statusFail: { marginTop: 10, color: colors.danger, fontSize: 13 },
+  infoTitle: {
+    marginTop: 10,
+    marginBottom: 12,
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700"
+  },
+  fieldRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+    paddingVertical: 12
+  },
+  fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 4 },
+  fieldValue: { color: colors.text, fontSize: 15, lineHeight: 22 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24 },
+  centerText: { color: colors.textMuted, textAlign: "center" },
+  error: { color: colors.danger, textAlign: "center", fontSize: 15 },
+  inlineError: { marginTop: 16, color: colors.danger, fontSize: 13 },
+  button: {
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    minHeight: 44,
+    justifyContent: "center"
+  },
+  buttonText: { color: colors.bg, fontWeight: "700" }
+});

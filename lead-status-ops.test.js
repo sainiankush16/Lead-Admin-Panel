@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { planLeadStatusUpdate, planLeadStatusColumnCreate } = require("./lead-status-ops");
+const { planLeadStatusUpdate, planLeadStatusColumnCreate, decideLeadStatusWrite, readCurrentLeadStatus } = require("./lead-status-ops");
 const { columnLetter } = require("./google");
 
 const project = {
@@ -93,4 +93,46 @@ test("project isolation keeps Project B spreadsheet out of Project A writes", ()
   assert.equal(forA.value.spreadsheetId, "sheet_project_a");
   assert.equal(forB.value.spreadsheetId, "sheet_project_b");
   assert.notEqual(forA.value.spreadsheetId, forB.value.spreadsheetId);
+});
+
+test("same status decision skips Google write and timeline", () => {
+  const planned = planLeadStatusUpdate({
+    project,
+    sheetData,
+    rowNumber: 2,
+    status: "New"
+  });
+  const decision = decideLeadStatusWrite({ sheetData, plannedValue: planned.value });
+  assert.equal(decision.unchanged, true);
+  assert.equal(decision.previousStatus, "New");
+  assert.equal(decision.status, "New");
+  assert.equal(decision.write, undefined);
+});
+
+test("changed status decision requires Google write before timeline", () => {
+  const planned = planLeadStatusUpdate({
+    project,
+    sheetData,
+    rowNumber: 2,
+    status: "Contacted"
+  });
+  const decision = decideLeadStatusWrite({ sheetData, plannedValue: planned.value });
+  assert.equal(decision.unchanged, false);
+  assert.equal(decision.previousStatus, "New");
+  assert.equal(decision.status, "Contacted");
+  assert.ok(decision.write);
+  assert.equal(decision.write.status, "Contacted");
+  assert.equal(decision.write.rowNumber, 2);
+});
+
+test("blank sheet status is treated as New for no-op detection", () => {
+  const planned = planLeadStatusUpdate({
+    project,
+    sheetData,
+    rowNumber: 4,
+    status: "New"
+  });
+  assert.equal(readCurrentLeadStatus(sheetData, 4), "New");
+  const decision = decideLeadStatusWrite({ sheetData, plannedValue: planned.value });
+  assert.equal(decision.unchanged, true);
 });

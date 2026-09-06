@@ -105,6 +105,18 @@ const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS lead_remarks_project_lead_idx ON lead_remarks(project_id, lead_id);
   CREATE INDEX IF NOT EXISTS lead_remarks_created_idx ON lead_remarks(created_at);
+
+  CREATE TABLE IF NOT EXISTS mobile_session_tokens (
+    token_hash TEXT PRIMARY KEY,
+    sid TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS mobile_session_tokens_sid_idx ON mobile_session_tokens(sid);
+  CREATE INDEX IF NOT EXISTS mobile_session_tokens_user_idx ON mobile_session_tokens(user_id);
+  CREATE INDEX IF NOT EXISTS mobile_session_tokens_expires_idx ON mobile_session_tokens(expires_at);
 `;
 
 function tursoConfig() {

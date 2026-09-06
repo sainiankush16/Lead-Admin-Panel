@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { resolveAdminUser, csrfTokensMatch } = require("./api-guards");
+const { resolveAdminUser, csrfTokensMatch, shouldBypassBrowserCsrf } = require("./api-guards");
 
 test("authenticated update requirement rejects anonymous and non-admin users", () => {
   assert.deepEqual(resolveAdminUser(null, "admin@example.test"), {
@@ -23,4 +23,11 @@ test("CSRF requirement rejects missing or mismatched tokens", () => {
   assert.equal(csrfTokensMatch("token-a", "token-b"), false);
   assert.equal(csrfTokensMatch(undefined, "token-a"), false);
   assert.equal(csrfTokensMatch("token-a", undefined), false);
+});
+
+test("browser CSRF bypass is only allowed for validated mobile bearer auth", () => {
+  assert.equal(shouldBypassBrowserCsrf({ mobileBearerAuth: true }), true);
+  assert.equal(shouldBypassBrowserCsrf({ mobileBearerAuth: "true" }), false);
+  assert.equal(shouldBypassBrowserCsrf({ mobileBearerAuth: false }), false);
+  assert.equal(shouldBypassBrowserCsrf({}), false);
 });

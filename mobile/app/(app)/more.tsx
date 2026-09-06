@@ -1,0 +1,226 @@
+import { useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
+import Constants from "expo-constants";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { BRAND_NAME, BRAND_TAGLINE } from "@/constants/branding";
+import { colors } from "@/constants/theme";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  configuredLegalLinks,
+  logoutConfirmationCopy,
+  mapAccountInfo,
+  mapAppInfo
+} from "@/utils/accountSettings";
+import { openExternalUrl } from "@/utils/linking";
+
+function resolveAppVersion() {
+  return Constants.expoConfig?.version || Constants.nativeAppVersion || null;
+}
+
+function resolveBuildNumber() {
+  return (
+    Constants.nativeBuildVersion ||
+    (Constants.expoConfig?.ios as { buildNumber?: string } | undefined)?.buildNumber ||
+    (Constants.expoConfig?.android as { versionCode?: number } | undefined)?.versionCode?.toString() ||
+    null
+  );
+}
+
+export default function MoreScreen() {
+  const { user, logout, status } = useAuth();
+  const [busy, setBusy] = useState(false);
+
+  const account = useMemo(() => mapAccountInfo(user), [user]);
+  const appInfo = useMemo(
+    () =>
+      mapAppInfo({
+        version: resolveAppVersion(),
+        buildNumber: resolveBuildNumber(),
+        platform: Platform.OS
+      }),
+    []
+  );
+  const legalLinks = useMemo(() => configuredLegalLinks(), []);
+
+  function confirmLogout() {
+    if (busy) return;
+    const copy = logoutConfirmationCopy();
+    Alert.alert(copy.title, copy.message, [
+      { text: copy.cancel, style: "cancel" },
+      {
+        text: copy.confirm,
+        style: "destructive",
+        onPress: () => {
+          void runLogout();
+        }
+      }
+    ]);
+  }
+
+  async function runLogout() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await logout();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["top"]}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.title}>More</Text>
+
+        <Text style={styles.section}>Account</Text>
+        {status === "loading" && !user ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color={colors.accent} />
+            <Text style={styles.muted}>Loading account...</Text>
+          </View>
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.label}>Name</Text>
+            <Text style={styles.value}>{account.name}</Text>
+
+            <Text style={styles.label}>Login ID</Text>
+            <Text style={styles.value}>{account.loginId}</Text>
+
+            <Text style={styles.label}>Role</Text>
+            <Text style={styles.value}>{account.roleLabel}</Text>
+
+            {account.statusLabel ? (
+              <>
+                <Text style={styles.label}>Status</Text>
+                <Text style={styles.value}>{account.statusLabel}</Text>
+              </>
+            ) : null}
+          </View>
+        )}
+
+        <Text style={styles.section}>App</Text>
+        <View style={styles.card}>
+          <Text style={styles.brand}>{BRAND_NAME}</Text>
+          <Text style={styles.tagline}>{BRAND_TAGLINE} CRM</Text>
+
+          <Text style={styles.label}>Version</Text>
+          <Text style={styles.value}>{appInfo.version}</Text>
+
+          {appInfo.buildNumber ? (
+            <>
+              <Text style={styles.label}>Build</Text>
+              <Text style={styles.value}>{appInfo.buildNumber}</Text>
+            </>
+          ) : null}
+
+          {appInfo.platform ? (
+            <>
+              <Text style={styles.label}>Platform</Text>
+              <Text style={styles.value}>{appInfo.platform}</Text>
+            </>
+          ) : null}
+        </View>
+
+        {legalLinks.length > 0 ? (
+          <>
+            <Text style={styles.section}>Legal</Text>
+            <View style={styles.card}>
+              {legalLinks.map(link => (
+                <Pressable
+                  key={link.url}
+                  accessibilityRole="link"
+                  accessibilityLabel={link.label}
+                  onPress={() => {
+                    void openExternalUrl(link.url, "Unable to open link.");
+                  }}
+                >
+                  <Text style={styles.link}>{link.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        ) : null}
+
+        <Text style={styles.section}>Account Action</Text>
+        <Pressable
+          style={[styles.logoutBtn, busy && styles.disabled]}
+          disabled={busy}
+          accessibilityRole="button"
+          accessibilityLabel="Logout"
+          accessibilityState={{ busy }}
+          onPress={confirmLogout}
+        >
+          {busy ? (
+            <ActivityIndicator color={colors.bg} />
+          ) : (
+            <Text style={styles.logoutText}>Logout</Text>
+          )}
+        </Pressable>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
+  content: { padding: 24, paddingBottom: 40 },
+  title: { color: colors.text, fontSize: 28, fontWeight: "800", marginBottom: 18 },
+  section: {
+    marginTop: 8,
+    marginBottom: 10,
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textTransform: "uppercase"
+  },
+  card: {
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.card,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 18
+  },
+  label: {
+    marginTop: 10,
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  value: {
+    marginTop: 4,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: "600"
+  },
+  brand: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  tagline: { marginTop: 4, marginBottom: 4, color: colors.textSoft, fontSize: 14 },
+  muted: { color: colors.textMuted },
+  loadingRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 18 },
+  link: {
+    color: colors.accent,
+    fontWeight: "700",
+    fontSize: 15,
+    marginVertical: 8
+  },
+  logoutBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  disabled: { opacity: 0.7 },
+  logoutText: { color: colors.bg, fontWeight: "800", fontSize: 16 }
+});

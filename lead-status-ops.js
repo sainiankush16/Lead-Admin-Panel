@@ -3,6 +3,39 @@
 const { validateLeadStatusUpdate, validateLeadStatusRowNumber } = require("./lead-status");
 const { findLeadStatusColumn, findLeadStatusColumnIndex } = require("./sheet-data");
 
+/**
+ * Read the current sheet status for a row (blank → "New", matching web behavior).
+ */
+function readCurrentLeadStatus(sheetData, rowNumber) {
+  const statusCol = findLeadStatusColumn(sheetData?.columns || []);
+  const leadIndex = (sheetData?.rowNumbers || []).indexOf(rowNumber);
+  if (!statusCol || leadIndex < 0) return "New";
+  return String(sheetData.leads[leadIndex]?.[statusCol] ?? "").trim() || "New";
+}
+
+/**
+ * After planning a valid write, decide whether Sheets + timeline should run.
+ * Same status → no Google write and no STATUS_CHANGED event.
+ */
+function decideLeadStatusWrite({ sheetData, plannedValue }) {
+  const previousStatus = readCurrentLeadStatus(sheetData, plannedValue.rowNumber);
+  if (previousStatus === plannedValue.status) {
+    return {
+      unchanged: true,
+      previousStatus,
+      status: plannedValue.status,
+      rowNumber: plannedValue.rowNumber
+    };
+  }
+  return {
+    unchanged: false,
+    previousStatus,
+    status: plannedValue.status,
+    rowNumber: plannedValue.rowNumber,
+    write: plannedValue
+  };
+}
+
 function planLeadStatusUpdate({ project, sheetData, rowNumber, status }) {
   if (!project) return { statusCode: 404, error: "Project not found." };
 
@@ -57,4 +90,9 @@ function planLeadStatusColumnCreate({ project, sheetData }) {
   };
 }
 
-module.exports = { planLeadStatusUpdate, planLeadStatusColumnCreate };
+module.exports = {
+  planLeadStatusUpdate,
+  planLeadStatusColumnCreate,
+  readCurrentLeadStatus,
+  decideLeadStatusWrite
+};

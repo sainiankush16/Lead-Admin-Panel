@@ -20,9 +20,15 @@ function csrfTokensMatch(expected, received) {
   return Boolean(expected) && safeEqual(expected, received);
 }
 
+/** Browser cookie mutations keep CSRF. Valid mobile bearer auth may skip browser CSRF. */
+function shouldBypassBrowserCsrf(req) {
+  return Boolean(req && req.mobileBearerAuth === true);
+}
+
 module.exports = {
   safeEqual,
   csrfTokensMatch,
+  shouldBypassBrowserCsrf,
   resolveAdminUser,
   resolveAuthenticatedUser,
   resolveAdminRole,
