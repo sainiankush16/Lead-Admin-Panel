@@ -77,8 +77,76 @@ function filterLeadListItems(items, { query = "", status = "" } = {}) {
   });
 }
 
+function areLeadListFiltersActive({ query = "", status = "All" } = {}) {
+  return Boolean(String(query || "").trim()) || (String(status || "").trim() !== "All" && Boolean(status));
+}
+
+function formatLeadListCount({ filteredCount, totalCount, filtersActive }) {
+  const filtered = Number(filteredCount);
+  const total = Number(totalCount);
+  if (!Number.isFinite(filtered) || filtered < 0) return "No matching leads";
+  if (filtersActive) {
+    if (filtered === 0) return "No matching leads";
+    if (filtered === 1) return `1 of ${total} matching leads`;
+    return `${filtered} of ${total} matching leads`;
+  }
+  if (!Number.isFinite(total) || total <= 0) return "No leads found";
+  if (total === 1) return "1 lead";
+  return `${total} leads`;
+}
+
+function displayLeadListName(name) {
+  const text = String(name ?? "").trim();
+  return text || "Unnamed Lead";
+}
+
+function displayLeadListPhone(phone) {
+  const text = String(phone ?? "").trim();
+  return text || "—";
+}
+
+function displayLeadListEmail(email) {
+  const text = String(email ?? "").trim();
+  return text || "—";
+}
+
+function displayLeadListStatus(status) {
+  const text = String(status ?? "").trim();
+  return text || "Unknown";
+}
+
+function leadListDetailHref(projectId, rowNumber) {
+  const id = Number(projectId);
+  const row = Number(rowNumber);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  if (!Number.isSafeInteger(row) || row < 2) return null;
+  return `/projects/${id}/lead/${row}`;
+}
+
+function clearLeadListFilters(state = {}) {
+  return {
+    ...state,
+    query: "",
+    status: "All"
+  };
+}
+
+/** Scroll is preserved by Expo Router Stack keeping the list screen mounted. */
+function leadListScrollRestorationStrategy() {
+  return "stack-native";
+}
+
 module.exports = {
   buildLeadListItems,
   leadMatchesQuery,
-  filterLeadListItems
+  filterLeadListItems,
+  areLeadListFiltersActive,
+  formatLeadListCount,
+  displayLeadListName,
+  displayLeadListPhone,
+  displayLeadListEmail,
+  displayLeadListStatus,
+  leadListDetailHref,
+  clearLeadListFilters,
+  leadListScrollRestorationStrategy
 };

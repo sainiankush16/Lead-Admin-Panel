@@ -27,3 +27,31 @@ export function filterLeadListItems(
 ): LeadListItem[] {
   return core.filterLeadListItems(items, options);
 }
+
+export function areLeadListFiltersActive(options: {
+  query?: string;
+  status?: string;
+} = {}): boolean {
+  return core.areLeadListFiltersActive(options);
+}
+
+export function formatLeadListCount(options: {
+  filteredCount: number;
+  totalCount: number;
+  filtersActive: boolean;
+}): string {
+  return core.formatLeadListCount(options);
+}
+
+export const displayLeadListName = core.displayLeadListName as (name: unknown) => string;
+export const displayLeadListPhone = core.displayLeadListPhone as (phone: unknown) => string;
+export const displayLeadListEmail = core.displayLeadListEmail as (email: unknown) => string;
+export const displayLeadListStatus = core.displayLeadListStatus as (status: unknown) => string;
+export const leadListDetailHref = core.leadListDetailHref as (
+  projectId: number,
+  rowNumber: number
+) => string | null;
+export const clearLeadListFilters = core.clearLeadListFilters as <T extends Record<string, unknown>>(
+  state?: T
+) => T & { query: string; status: string };
+export const leadListScrollRestorationStrategy = core.leadListScrollRestorationStrategy as () => string;

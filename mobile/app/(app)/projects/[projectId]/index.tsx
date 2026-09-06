@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -9,7 +9,7 @@ import {
   TextInput,
   View
 } from "react-native";
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadCard } from "@/components/LeadCard";
@@ -17,7 +17,14 @@ import { LEAD_STATUSES } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { api, ApiClientError } from "@/services/api";
 import { normalizeLeadListStatusParam } from "@/utils/dashboardSummary";
-import { buildLeadListItems, filterLeadListItems, type LeadListItem } from "@/utils/leadList";
+import {
+  areLeadListFiltersActive,
+  buildLeadListItems,
+  filterLeadListItems,
+  formatLeadListCount,
+  leadListDetailHref,
+  type LeadListItem
+} from "@/utils/leadList";
 
 const STATUS_FILTERS = ["All", ...LEAD_STATUSES, "Unknown"] as const;
 
@@ -35,6 +42,7 @@ export default function ProjectLeadsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const skipNextFocusRefresh = useRef(true);
 
   useEffect(() => {
     if (routeStatus) {
@@ -42,14 +50,14 @@ export default function ProjectLeadsScreen() {
     }
   }, [routeStatus]);
 
-  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+  const load = useCallback(async (mode: "initial" | "refresh" | "focus" = "initial") => {
     if (!Number.isSafeInteger(projectId) || projectId <= 0) {
       setError("Project or leads not found.");
       setLoading(false);
       return;
     }
     if (mode === "refresh") setRefreshing(true);
-    else setLoading(true);
+    else if (mode === "initial") setLoading(true);
     setError(null);
     setForbidden(false);
     try {
@@ -80,28 +88,53 @@ export default function ProjectLeadsScreen() {
     void load("initial");
   }, [load]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (skipNextFocusRefresh.current) {
+        skipNextFocusRefresh.current = false;
+        return;
+      }
+      // Returning from Lead Detail: refresh server data without resetting filters/scroll.
+      void load("focus");
+    }, [load])
+  );
+
   const filtered = useMemo(
     () => filterLeadListItems(items, { query, status }),
     [items, query, status]
   );
 
-  const filtersActive = Boolean(query.trim()) || (status && status !== "All");
+  const filtersActive = areLeadListFiltersActive({ query, status });
+  const countLabel = formatLeadListCount({
+    filteredCount: filtered.length,
+    totalCount: items.length,
+    filtersActive
+  });
+
+  function clearStatusFilter() {
+    setStatus("All");
+    router.setParams({ status: undefined });
+  }
 
   function clearFilters() {
     setQuery("");
     setStatus("All");
-    if (routeStatus) {
-      router.setParams({ status: undefined });
-    }
+    router.setParams({ status: undefined });
   }
 
   function selectStatus(option: string) {
     setStatus(option);
     if (option === "All") {
-      if (routeStatus) router.setParams({ status: undefined });
+      router.setParams({ status: undefined });
       return;
     }
     router.setParams({ status: option });
+  }
+
+  function openLead(item: LeadListItem) {
+    const href = leadListDetailHref(projectId, item.rowNumber);
+    if (!href) return;
+    router.push(href);
   }
 
   return (
@@ -110,10 +143,8 @@ export default function ProjectLeadsScreen() {
 
       <View style={styles.header}>
         <Text style={styles.projectTitle}>{projectName}</Text>
-        <Text style={styles.count}>
-          {filtersActive
-            ? `${filtered.length} of ${items.length} leads`
-            : `${items.length} ${items.length === 1 ? "Lead" : "Leads"}`}
+        <Text style={styles.count} accessibilityLabel={countLabel}>
+          {countLabel}
         </Text>
 
         {status !== "All" ? (
@@ -122,7 +153,7 @@ export default function ProjectLeadsScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Clear status filter"
-              onPress={clearFilters}
+              onPress={clearStatusFilter}
             >
               <Text style={styles.clearFiltersText}>Clear</Text>
             </Pressable>
@@ -133,11 +164,12 @@ export default function ProjectLeadsScreen() {
           style={styles.search}
           value={query}
           onChangeText={setQuery}
-          placeholder="🔍 Search by name, phone or email"
+          placeholder="Search by name, phone or email"
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
           autoCorrect={false}
           clearButtonMode="while-editing"
+          accessibilityLabel="Search leads in this project"
         />
 
         <View style={styles.filterRow}>
@@ -209,6 +241,8 @@ export default function ProjectLeadsScreen() {
           <Text style={styles.centerText}>No leads found for this project.</Text>
           <Pressable
             style={styles.retry}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh leads"
             onPress={() => {
               void load("refresh");
             }}
@@ -220,7 +254,15 @@ export default function ProjectLeadsScreen() {
 
       {!loading && !error && items.length > 0 && filtered.length === 0 ? (
         <View style={styles.center}>
-          <Text style={styles.centerText}>No leads found.</Text>
+          <Text style={styles.centerText}>No matching leads</Text>
+          <Pressable
+            style={styles.retry}
+            accessibilityRole="button"
+            accessibilityLabel="Clear filters"
+            onPress={clearFilters}
+          >
+            <Text style={styles.retryText}>Clear Filters</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -228,6 +270,7 @@ export default function ProjectLeadsScreen() {
         data={filtered}
         keyExtractor={item => item.leadId}
         contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -237,14 +280,7 @@ export default function ProjectLeadsScreen() {
             tintColor={colors.accent}
           />
         }
-        renderItem={({ item }) => (
-          <LeadCard
-            item={item}
-            onPress={() => {
-              router.push(`/projects/${projectId}/lead/${item.rowNumber}`);
-            }}
-          />
-        )}
+        renderItem={({ item }) => <LeadCard item={item} onPress={() => openLead(item)} />}
       />
     </SafeAreaView>
   );

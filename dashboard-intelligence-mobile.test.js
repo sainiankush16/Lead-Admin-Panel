@@ -145,7 +145,10 @@ test("Dashboard and Lead List wire actionable navigation without new APIs", () =
   assert.match(leadList, /Status: \{status\}/);
   assert.match(leadList, /clearFilters/);
   assert.match(leadList, /filterLeadListItems/);
-  assert.match(leadList, /router\.push\(`\/projects\/\$\{projectId\}\/lead\/\$\{item\.rowNumber\}`\)/);
+  assert.match(
+    leadList,
+    /leadListDetailHref\(projectId,\s*item\.rowNumber\)|router\.push\(`\/projects\/\$\{projectId\}\/lead\/\$\{item\.rowNumber\}`\)/
+  );
 
   assert.doesNotMatch(api, /\/api\/dashboard|\/api\/analytics|\/api\/actionable/);
   assert.doesNotMatch(server, /app\.(get|post)\("\/api\/dashboard/);
