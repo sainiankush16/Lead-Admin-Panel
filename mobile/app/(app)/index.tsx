@@ -8,6 +8,7 @@ import {
   Text,
   View
 } from "react-native";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BRAND_NAME } from "@/constants/branding";
@@ -17,7 +18,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { ApiClientError } from "@/services/api";
 import { loadDashboardSummary } from "@/services/dashboard";
 import {
+  ACTIONABLE_STATUSES,
+  buildLeadListPath,
   greetingForDate,
+  resolveActionableLeadTarget,
+  type ActionableStatus,
   type DashboardSummary
 } from "@/utils/dashboardSummary";
 
@@ -26,6 +31,7 @@ function formatCount(value: number): string {
 }
 
 export default function DashboardScreen() {
+  const router = useRouter();
   const { user } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,6 +68,21 @@ export default function DashboardScreen() {
   }, [load]);
 
   const displayName = user?.name?.trim() || user?.loginId || "there";
+
+  function openProjectLeads(projectId: number, status?: string | null) {
+    const path = buildLeadListPath(projectId, status);
+    if (!path) return;
+    router.push(path);
+  }
+
+  function openActionable(status: ActionableStatus) {
+    if (!summary) return;
+    const target = resolveActionableLeadTarget(summary, status);
+    if (!target) return;
+    openProjectLeads(target.projectId, target.status);
+  }
+
+  const showMetrics = Boolean(summary && summary.hasProjects);
 
   return (
     <SafeAreaView style={styles.safe} edges={["top"]}>
@@ -117,48 +138,77 @@ export default function DashboardScreen() {
           </View>
         ) : null}
 
-        {summary && summary.hasProjects && summary.hasLeads ? (
+        {showMetrics && summary ? (
           <>
             <View style={styles.totalCard} accessibilityRole="summary">
               <Text style={styles.totalLabel}>TOTAL LEADS</Text>
               <Text style={styles.totalValue}>{formatCount(summary.totalLeads)}</Text>
             </View>
 
-            <View style={styles.statusGrid}>
-              {LEAD_STATUSES.map(status => (
-                <View key={status} style={styles.statusCard} accessibilityLabel={`${status}: ${summary.statuses[status]}`}>
-                  <Text style={styles.statusName}>{status}</Text>
-                  <Text style={styles.statusCount}>{formatCount(summary.statuses[status])}</Text>
-                </View>
-              ))}
+            <Text style={styles.sectionTitle}>Actionable Leads</Text>
+            <View style={styles.actionableGrid}>
+              {ACTIONABLE_STATUSES.map(status => {
+                const count = summary.actionable[status] || 0;
+                return (
+                  <Pressable
+                    key={status}
+                    style={styles.actionableCard}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${status}: ${count}. Open filtered lead list`}
+                    onPress={() => openActionable(status)}
+                  >
+                    <Text style={styles.actionableName}>{status}</Text>
+                    <Text style={styles.actionableCount}>{formatCount(count)}</Text>
+                    <Text style={styles.actionableHint}>View leads</Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
-            {summary.unknownStatusCount > 0 ? (
-              <Text style={styles.unknownNote}>
-                Unknown / blank status: {formatCount(summary.unknownStatusCount)}
-              </Text>
+            {summary.hasLeads ? (
+              <>
+                <Text style={styles.sectionTitle}>Lead Status</Text>
+                <View style={styles.statusGrid}>
+                  {LEAD_STATUSES.map(status => (
+                    <View
+                      key={status}
+                      style={styles.statusCard}
+                      accessibilityLabel={`${status}: ${summary.statuses[status]}`}
+                    >
+                      <Text style={styles.statusName}>{status}</Text>
+                      <Text style={styles.statusCount}>{formatCount(summary.statuses[status])}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {summary.unknownStatusCount > 0 ? (
+                  <Text style={styles.unknownNote}>
+                    Unknown / blank status: {formatCount(summary.unknownStatusCount)}
+                  </Text>
+                ) : null}
+              </>
             ) : null}
 
             <Text style={styles.sectionTitle}>Projects</Text>
             {summary.projects.map(project => (
-              <View key={project.projectId} style={styles.projectCard}>
+              <Pressable
+                key={project.projectId}
+                style={styles.projectCard}
+                accessibilityRole="button"
+                accessibilityLabel={`${project.projectName}: ${project.leadCount} leads. Open project`}
+                onPress={() => openProjectLeads(project.projectId)}
+              >
                 <Text style={styles.projectName}>{project.projectName}</Text>
                 <Text style={styles.projectCount}>
                   {formatCount(project.leadCount)} {project.leadCount === 1 ? "Lead" : "Leads"}
                 </Text>
-              </View>
-            ))}
-          </>
-        ) : null}
-
-        {summary && summary.hasProjects && !summary.hasLeads ? (
-          <>
-            <Text style={styles.sectionTitle}>Projects</Text>
-            {summary.projects.map(project => (
-              <View key={project.projectId} style={styles.projectCard}>
-                <Text style={styles.projectName}>{project.projectName}</Text>
-                <Text style={styles.projectCount}>0 Leads</Text>
-              </View>
+                {(project.statusCounts?.["Follow Up"] || 0) > 0 ? (
+                  <Text style={styles.projectFollowUp}>
+                    Follow Up: {formatCount(project.statusCounts["Follow Up"])}
+                  </Text>
+                ) : null}
+                <Text style={styles.projectHint}>Open lead list</Text>
+              </Pressable>
             ))}
           </>
         ) : null}
@@ -183,9 +233,10 @@ const styles = StyleSheet.create({
     fontSize: 16
   },
   centerBlock: {
-    marginTop: 40,
+    marginTop: 24,
     alignItems: "center",
-    gap: 12
+    gap: 12,
+    marginBottom: 8
   },
   centerText: {
     color: colors.textMuted,
@@ -215,7 +266,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentDark,
     borderRadius: 16,
     padding: 20,
-    marginBottom: 16
+    marginBottom: 8
   },
   totalLabel: {
     color: "#E0F2FE",
@@ -228,6 +279,46 @@ const styles = StyleSheet.create({
     color: "#F8FAFC",
     fontSize: 40,
     fontWeight: "800"
+  },
+  sectionTitle: {
+    marginTop: 16,
+    marginBottom: 10,
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: "700"
+  },
+  actionableGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 4
+  },
+  actionableCard: {
+    flexBasis: "47%",
+    flexGrow: 1,
+    backgroundColor: colors.card,
+    borderColor: colors.accent,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 14,
+    minHeight: 92
+  },
+  actionableName: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  actionableCount: {
+    marginTop: 8,
+    color: colors.accent,
+    fontSize: 26,
+    fontWeight: "800"
+  },
+  actionableHint: {
+    marginTop: 6,
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "600"
   },
   statusGrid: {
     flexDirection: "row",
@@ -262,13 +353,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12
   },
-  sectionTitle: {
-    marginTop: 16,
-    marginBottom: 10,
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "700"
-  },
   projectCard: {
     backgroundColor: colors.card,
     borderColor: colors.cardBorder,
@@ -286,5 +370,17 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: colors.textMuted,
     fontSize: 14
+  },
+  projectFollowUp: {
+    marginTop: 4,
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "700"
+  },
+  projectHint: {
+    marginTop: 8,
+    color: colors.textSoft,
+    fontSize: 12,
+    fontWeight: "600"
   }
 });

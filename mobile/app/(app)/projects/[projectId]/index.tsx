@@ -16,23 +16,31 @@ import { LeadCard } from "@/components/LeadCard";
 import { LEAD_STATUSES } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { api, ApiClientError } from "@/services/api";
+import { normalizeLeadListStatusParam } from "@/utils/dashboardSummary";
 import { buildLeadListItems, filterLeadListItems, type LeadListItem } from "@/utils/leadList";
 
 const STATUS_FILTERS = ["All", ...LEAD_STATUSES, "Unknown"] as const;
 
 export default function ProjectLeadsScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ projectId: string }>();
+  const params = useLocalSearchParams<{ projectId: string; status?: string | string[] }>();
   const projectId = Number(params.projectId);
+  const routeStatus = normalizeLeadListStatusParam(params.status);
 
   const [projectName, setProjectName] = useState("Project");
   const [items, setItems] = useState<LeadListItem[]>([]);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<string>("All");
+  const [status, setStatus] = useState<string>(routeStatus || "All");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+
+  useEffect(() => {
+    if (routeStatus) {
+      setStatus(routeStatus);
+    }
+  }, [routeStatus]);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (!Number.isSafeInteger(projectId) || projectId <= 0) {
@@ -79,6 +87,23 @@ export default function ProjectLeadsScreen() {
 
   const filtersActive = Boolean(query.trim()) || (status && status !== "All");
 
+  function clearFilters() {
+    setQuery("");
+    setStatus("All");
+    if (routeStatus) {
+      router.setParams({ status: undefined });
+    }
+  }
+
+  function selectStatus(option: string) {
+    setStatus(option);
+    if (option === "All") {
+      if (routeStatus) router.setParams({ status: undefined });
+      return;
+    }
+    router.setParams({ status: option });
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <Stack.Screen options={{ title: projectName }} />
@@ -90,6 +115,19 @@ export default function ProjectLeadsScreen() {
             ? `${filtered.length} of ${items.length} leads`
             : `${items.length} ${items.length === 1 ? "Lead" : "Leads"}`}
         </Text>
+
+        {status !== "All" ? (
+          <View style={styles.activeFilter}>
+            <Text style={styles.activeFilterText}>Status: {status}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear status filter"
+              onPress={clearFilters}
+            >
+              <Text style={styles.clearFiltersText}>Clear</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <TextInput
           style={styles.search}
@@ -112,7 +150,7 @@ export default function ProjectLeadsScreen() {
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={`Filter ${option}`}
-                onPress={() => setStatus(option)}
+                onPress={() => selectStatus(option)}
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{option}</Text>
               </Pressable>
@@ -125,10 +163,7 @@ export default function ProjectLeadsScreen() {
             style={styles.clearFilters}
             accessibilityRole="button"
             accessibilityLabel="Clear filters"
-            onPress={() => {
-              setQuery("");
-              setStatus("All");
-            }}
+            onPress={clearFilters}
           >
             <Text style={styles.clearFiltersText}>Clear Filters</Text>
           </Pressable>
@@ -220,6 +255,19 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
   projectTitle: { color: colors.text, fontSize: 22, fontWeight: "700" },
   count: { marginTop: 4, marginBottom: 12, color: colors.textMuted, fontSize: 14 },
+  activeFilter: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: colors.card,
+    borderColor: colors.accent,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10
+  },
+  activeFilterText: { color: colors.text, fontWeight: "700", fontSize: 13 },
   search: {
     borderWidth: 1,
     borderColor: colors.cardBorder,
