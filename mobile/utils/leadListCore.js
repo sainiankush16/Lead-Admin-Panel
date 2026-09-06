@@ -136,6 +136,155 @@ function leadListScrollRestorationStrategy() {
   return "stack-native";
 }
 
+const BULK_STATUS_CONCURRENCY = 4;
+
+function selectionKeyFromRowNumber(rowNumber) {
+  const row = Number(rowNumber);
+  if (!Number.isSafeInteger(row) || row < 2) return null;
+  return String(row);
+}
+
+function toggleLeadSelection(selectedKeys, rowNumber) {
+  const key = selectionKeyFromRowNumber(rowNumber);
+  const next = new Set(Array.isArray(selectedKeys) ? selectedKeys : [...(selectedKeys || [])]);
+  if (!key) return next;
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
+function selectAllVisibleLeads(visibleItems) {
+  const next = new Set();
+  const list = Array.isArray(visibleItems) ? visibleItems : [];
+  for (const item of list) {
+    const key = selectionKeyFromRowNumber(item?.rowNumber);
+    if (key) next.add(key);
+  }
+  return next;
+}
+
+function clearLeadSelection() {
+  return new Set();
+}
+
+function selectedLeadCount(selectedKeys) {
+  if (!selectedKeys) return 0;
+  if (selectedKeys instanceof Set) return selectedKeys.size;
+  if (Array.isArray(selectedKeys)) return selectedKeys.length;
+  return 0;
+}
+
+function formatSelectionCount(count) {
+  const n = Number(count);
+  if (!Number.isFinite(n) || n <= 0) return "0 selected";
+  if (n === 1) return "1 selected";
+  return `${n} selected`;
+}
+
+function canEnableBulkStatus({ selectedCount, busy }) {
+  if (busy) return false;
+  return Number(selectedCount) > 0;
+}
+
+function bulkStatusConfirmationCopy(count, status) {
+  const n = Number(count) || 0;
+  const label = String(status || "").trim() || "status";
+  return {
+    title: "Confirm bulk status update",
+    message: `Change ${n} selected lead${n === 1 ? "" : "s"} to "${label}"?`,
+    cancel: "Cancel",
+    confirm: "Confirm"
+  };
+}
+
+function classifyBulkStatusOutcome(response, error) {
+  if (error) return "failed";
+  if (!response || typeof response !== "object") return "failed";
+  if (response.unchanged === true) return "unchanged";
+  if (response.ok === true || response.success === true || typeof response.status === "string") {
+    return "updated";
+  }
+  return "failed";
+}
+
+function emptyBulkStatusSummary(total = 0) {
+  return {
+    total: Number(total) || 0,
+    updated: 0,
+    unchanged: 0,
+    failed: 0,
+    succeeded: 0
+  };
+}
+
+function aggregateBulkStatusResults(outcomes) {
+  const list = Array.isArray(outcomes) ? outcomes : [];
+  const summary = emptyBulkStatusSummary(list.length);
+  for (const outcome of list) {
+    if (outcome === "updated") summary.updated += 1;
+    else if (outcome === "unchanged") summary.unchanged += 1;
+    else summary.failed += 1;
+  }
+  summary.succeeded = summary.updated + summary.unchanged;
+  return summary;
+}
+
+function formatBulkStatusResult(summary) {
+  const total = Number(summary?.total) || 0;
+  const succeeded = Number(summary?.succeeded) || 0;
+  const failed = Number(summary?.failed) || 0;
+  const unchanged = Number(summary?.unchanged) || 0;
+  const updated = Number(summary?.updated) || 0;
+
+  if (total <= 0) return "No leads selected.";
+  if (failed === 0 && unchanged === 0) {
+    return `${updated} lead${updated === 1 ? "" : "s"} updated successfully.`;
+  }
+  if (failed === 0) {
+    if (updated === 0) {
+      return `${unchanged} lead${unchanged === 1 ? "" : "s"} already had this status.`;
+    }
+    return `${updated} updated, ${unchanged} already had this status.`;
+  }
+  if (succeeded === 0) {
+    return `0 of ${total} leads updated.`;
+  }
+  return `${succeeded} of ${total} leads updated. ${failed} failed.`;
+}
+
+async function runBulkLeadStatusUpdates({
+  projectId,
+  rowNumbers,
+  status,
+  updateLeadStatus,
+  concurrency = BULK_STATUS_CONCURRENCY,
+  onProgress
+}) {
+  const { mapPool } = require("./dashboardSummaryCore");
+  const rows = Array.isArray(rowNumbers)
+    ? rowNumbers.map(Number).filter(row => Number.isSafeInteger(row) && row >= 2)
+    : [];
+  let completed = 0;
+  const outcomes = await mapPool(rows, concurrency, async rowNumber => {
+    try {
+      const response = await updateLeadStatus(projectId, rowNumber, status);
+      const outcome = classifyBulkStatusOutcome(response, null);
+      completed += 1;
+      if (typeof onProgress === "function") {
+        onProgress({ completed, total: rows.length, rowNumber, outcome });
+      }
+      return outcome;
+    } catch (_err) {
+      completed += 1;
+      if (typeof onProgress === "function") {
+        onProgress({ completed, total: rows.length, rowNumber, outcome: "failed" });
+      }
+      return "failed";
+    }
+  });
+  return aggregateBulkStatusResults(outcomes);
+}
+
 module.exports = {
   buildLeadListItems,
   leadMatchesQuery,
@@ -148,5 +297,19 @@ module.exports = {
   displayLeadListStatus,
   leadListDetailHref,
   clearLeadListFilters,
-  leadListScrollRestorationStrategy
+  leadListScrollRestorationStrategy,
+  BULK_STATUS_CONCURRENCY,
+  selectionKeyFromRowNumber,
+  toggleLeadSelection,
+  selectAllVisibleLeads,
+  clearLeadSelection,
+  selectedLeadCount,
+  formatSelectionCount,
+  canEnableBulkStatus,
+  bulkStatusConfirmationCopy,
+  classifyBulkStatusOutcome,
+  emptyBulkStatusSummary,
+  aggregateBulkStatusResults,
+  formatBulkStatusResult,
+  runBulkLeadStatusUpdates
 };

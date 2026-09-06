@@ -13,9 +13,16 @@ import { openCall, openWhatsApp } from "@/utils/linking";
 interface LeadCardProps {
   item: LeadListItem;
   onPress: () => void;
+  selectionMode?: boolean;
+  selected?: boolean;
 }
 
-export function LeadCard({ item, onPress }: LeadCardProps) {
+export function LeadCard({
+  item,
+  onPress,
+  selectionMode = false,
+  selected = false
+}: LeadCardProps) {
   const hasCall = Boolean(item.telHref);
   const hasWa = Boolean(item.waHref);
   const name = displayLeadListName(item.name);
@@ -25,12 +32,26 @@ export function LeadCard({ item, onPress }: LeadCardProps) {
 
   return (
     <Pressable
-      style={styles.card}
+      style={[styles.card, selectionMode && selected && styles.cardSelected]}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Open lead ${name}, status ${status}`}
+      accessibilityLabel={
+        selectionMode
+          ? `${selected ? "Deselect" : "Select"} lead ${name}, status ${status}`
+          : `Open lead ${name}, status ${status}`
+      }
+      accessibilityState={selectionMode ? { selected } : undefined}
     >
       <View style={styles.topRow}>
+        {selectionMode ? (
+          <View
+            style={[styles.checkbox, selected && styles.checkboxSelected]}
+            accessibilityElementsHidden
+            importantForAccessibility="no"
+          >
+            <Text style={styles.checkboxMark}>{selected ? "✓" : ""}</Text>
+          </View>
+        ) : null}
         <Text style={styles.name}>{name}</Text>
         <View style={styles.statusChip} accessibilityLabel={`Lead Status ${status}`}>
           <Text style={styles.statusValue}>{status}</Text>
@@ -43,34 +64,38 @@ export function LeadCard({ item, onPress }: LeadCardProps) {
       <Text style={styles.label}>Email</Text>
       <Text style={styles.value}>{email}</Text>
 
-      <View style={styles.actions}>
-        <Pressable
-          style={[styles.actionBtn, !hasCall && styles.actionDisabled]}
-          disabled={!hasCall}
-          accessibilityRole="button"
-          accessibilityLabel={`Call ${name}`}
-          accessibilityState={{ disabled: !hasCall }}
-          onPress={() => {
-            void openCall(item.telHref);
-          }}
-        >
-          <Text style={styles.actionText}>Call</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.waBtn, !hasWa && styles.actionDisabled]}
-          disabled={!hasWa}
-          accessibilityRole="button"
-          accessibilityLabel={`WhatsApp ${name}`}
-          accessibilityState={{ disabled: !hasWa }}
-          onPress={() => {
-            void openWhatsApp(item.waHref);
-          }}
-        >
-          <Text style={[styles.actionText, styles.waText]}>WhatsApp</Text>
-        </Pressable>
-      </View>
+      {!selectionMode ? (
+        <View style={styles.actions}>
+          <Pressable
+            style={[styles.actionBtn, !hasCall && styles.actionDisabled]}
+            disabled={!hasCall}
+            accessibilityRole="button"
+            accessibilityLabel={`Call ${name}`}
+            accessibilityState={{ disabled: !hasCall }}
+            onPress={() => {
+              void openCall(item.telHref);
+            }}
+          >
+            <Text style={styles.actionText}>Call</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.actionBtn, styles.waBtn, !hasWa && styles.actionDisabled]}
+            disabled={!hasWa}
+            accessibilityRole="button"
+            accessibilityLabel={`WhatsApp ${name}`}
+            accessibilityState={{ disabled: !hasWa }}
+            onPress={() => {
+              void openWhatsApp(item.waHref);
+            }}
+          >
+            <Text style={[styles.actionText, styles.waText]}>WhatsApp</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <Text style={styles.selectedHint}>{selected ? "Selected" : "Tap to select"}</Text>
+      )}
 
-      <Text style={styles.hint}>Tap for details</Text>
+      {!selectionMode ? <Text style={styles.hint}>Tap for details</Text> : null}
     </Pressable>
   );
 }
@@ -84,11 +109,36 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12
   },
+  cardSelected: {
+    borderColor: colors.accent,
+    borderWidth: 2,
+    backgroundColor: "#172554"
+  },
   topRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 10
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.textMuted,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2
+  },
+  checkboxSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent
+  },
+  checkboxMark: {
+    color: colors.bg,
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 16
   },
   name: {
     flex: 1,
@@ -156,5 +206,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: colors.textMuted,
     fontSize: 12
+  },
+  selectedHint: {
+    marginTop: 14,
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "700"
   }
 });

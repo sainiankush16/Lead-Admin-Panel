@@ -138,3 +138,9 @@ export type {
   ProjectLeadSummary,
   StatusCounts
 } from "@/utils/dashboardSummary";
+
+export type {
+  BulkStatusOutcome,
+  BulkStatusSummary,
+  BulkStatusProgress
+} from "@/utils/leadList";

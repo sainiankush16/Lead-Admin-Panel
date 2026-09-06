@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   RefreshControl,
@@ -13,16 +14,27 @@ import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-rou
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadCard } from "@/components/LeadCard";
-import { LEAD_STATUSES } from "@/constants/leadStatus";
+import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { api, ApiClientError } from "@/services/api";
 import { normalizeLeadListStatusParam } from "@/utils/dashboardSummary";
 import {
   areLeadListFiltersActive,
+  BULK_STATUS_CONCURRENCY,
   buildLeadListItems,
+  bulkStatusConfirmationCopy,
+  canEnableBulkStatus,
+  clearLeadSelection,
   filterLeadListItems,
+  formatBulkStatusResult,
   formatLeadListCount,
+  formatSelectionCount,
   leadListDetailHref,
+  runBulkLeadStatusUpdates,
+  selectAllVisibleLeads,
+  selectedLeadCount,
+  selectionKeyFromRowNumber,
+  toggleLeadSelection,
   type LeadListItem
 } from "@/utils/leadList";
 
@@ -42,7 +54,23 @@ export default function ProjectLeadsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => clearLeadSelection());
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<string | null>(null);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
   const skipNextFocusRefresh = useRef(true);
+  const bulkInFlight = useRef(false);
+  const mountedRef = useRef(true);
+  const filterSnapshot = useRef({ query: "", status: routeStatus || "All" });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (routeStatus) {
@@ -50,39 +78,52 @@ export default function ProjectLeadsScreen() {
     }
   }, [routeStatus]);
 
-  const load = useCallback(async (mode: "initial" | "refresh" | "focus" = "initial") => {
-    if (!Number.isSafeInteger(projectId) || projectId <= 0) {
-      setError("Project or leads not found.");
-      setLoading(false);
-      return;
-    }
-    if (mode === "refresh") setRefreshing(true);
-    else if (mode === "initial") setLoading(true);
-    setError(null);
-    setForbidden(false);
-    try {
-      const data = await api.getProjectLeads(projectId);
-      setProjectName(data.name || "Project");
-      setItems(buildLeadListItems(data));
-    } catch (err) {
-      if (err instanceof ApiClientError && err.status === 401) {
-        setError("Your session has expired.");
-      } else if (err instanceof ApiClientError && err.status === 403) {
-        setForbidden(true);
-        setError("You don't have access to this project.");
-      } else if (err instanceof ApiClientError && err.status === 404) {
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedKeys(clearLeadSelection());
+    setStatusPickerOpen(false);
+  }, []);
+
+  const load = useCallback(
+    async (mode: "initial" | "refresh" | "focus" = "initial") => {
+      if (!Number.isSafeInteger(projectId) || projectId <= 0) {
         setError("Project or leads not found.");
-      } else if (err instanceof TypeError) {
-        setError("Please check your internet connection.");
-      } else {
-        setError("Unable to load leads.");
+        setLoading(false);
+        return;
       }
-      if (mode === "initial") setItems([]);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [projectId]);
+      if (mode === "refresh") setRefreshing(true);
+      else if (mode === "initial") setLoading(true);
+      setError(null);
+      setForbidden(false);
+      try {
+        const data = await api.getProjectLeads(projectId);
+        if (!mountedRef.current) return;
+        setProjectName(data.name || "Project");
+        setItems(buildLeadListItems(data));
+      } catch (err) {
+        if (!mountedRef.current) return;
+        if (err instanceof ApiClientError && err.status === 401) {
+          setError("Your session has expired.");
+        } else if (err instanceof ApiClientError && err.status === 403) {
+          setForbidden(true);
+          setError("You don't have access to this project.");
+        } else if (err instanceof ApiClientError && err.status === 404) {
+          setError("Project or leads not found.");
+        } else if (err instanceof TypeError) {
+          setError("Please check your internet connection.");
+        } else {
+          setError("Unable to load leads.");
+        }
+        if (mode === "initial") setItems([]);
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [projectId]
+  );
 
   useEffect(() => {
     void load("initial");
@@ -92,11 +133,13 @@ export default function ProjectLeadsScreen() {
     useCallback(() => {
       if (skipNextFocusRefresh.current) {
         skipNextFocusRefresh.current = false;
-        return;
+      } else {
+        void load("focus");
       }
-      // Returning from Lead Detail: refresh server data without resetting filters/scroll.
-      void load("focus");
-    }, [load])
+      return () => {
+        exitSelectionMode();
+      };
+    }, [load, exitSelectionMode])
   );
 
   const filtered = useMemo(
@@ -104,12 +147,25 @@ export default function ProjectLeadsScreen() {
     [items, query, status]
   );
 
+  useEffect(() => {
+    const prev = filterSnapshot.current;
+    if (prev.query !== query || prev.status !== status) {
+      filterSnapshot.current = { query, status };
+      setSelectedKeys(clearLeadSelection());
+      setStatusPickerOpen(false);
+      setBulkResult(null);
+    }
+  }, [query, status]);
+
   const filtersActive = areLeadListFiltersActive({ query, status });
   const countLabel = formatLeadListCount({
     filteredCount: filtered.length,
     totalCount: items.length,
     filtersActive
   });
+  const selectedCount = selectedLeadCount(selectedKeys);
+  const selectionLabel = formatSelectionCount(selectedCount);
+  const bulkEnabled = canEnableBulkStatus({ selectedCount, busy: bulkBusy });
 
   function clearStatusFilter() {
     setStatus("All");
@@ -137,6 +193,109 @@ export default function ProjectLeadsScreen() {
     router.push(href);
   }
 
+  function onLeadPress(item: LeadListItem) {
+    if (selectionMode) {
+      if (bulkBusy) return;
+      setSelectedKeys(prev => toggleLeadSelection(prev, item.rowNumber));
+      setBulkResult(null);
+      return;
+    }
+    openLead(item);
+  }
+
+  function enterSelectionMode() {
+    setSelectionMode(true);
+    setSelectedKeys(clearLeadSelection());
+    setStatusPickerOpen(false);
+    setBulkResult(null);
+  }
+
+  function cancelSelection() {
+    if (bulkBusy) return;
+    exitSelectionMode();
+    setBulkResult(null);
+  }
+
+  function selectAllVisible() {
+    if (bulkBusy) return;
+    setSelectedKeys(selectAllVisibleLeads(filtered));
+    setBulkResult(null);
+  }
+
+  function clearSelectionOnly() {
+    if (bulkBusy) return;
+    setSelectedKeys(clearLeadSelection());
+    setStatusPickerOpen(false);
+    setBulkResult(null);
+  }
+
+  function onPullRefresh() {
+    if (bulkInFlight.current || bulkBusy) return;
+    exitSelectionMode();
+    setBulkResult(null);
+    void load("refresh");
+  }
+
+  function openStatusPicker() {
+    if (!bulkEnabled) return;
+    setStatusPickerOpen(true);
+    setBulkResult(null);
+  }
+
+  function chooseBulkStatus(target: LeadStatusValue) {
+    if (!bulkEnabled) return;
+    const copy = bulkStatusConfirmationCopy(selectedCount, target);
+    Alert.alert(copy.title, copy.message, [
+      { text: copy.cancel, style: "cancel" },
+      {
+        text: copy.confirm,
+        onPress: () => {
+          void executeBulkStatus(target);
+        }
+      }
+    ]);
+  }
+
+  async function executeBulkStatus(target: LeadStatusValue) {
+    if (bulkInFlight.current || selectedCount <= 0) return;
+    bulkInFlight.current = true;
+    setBulkBusy(true);
+    setStatusPickerOpen(false);
+    setBulkProgress(`Updating 0 of ${selectedCount}...`);
+    setBulkResult(null);
+
+    const rowNumbers = [...selectedKeys]
+      .map(key => Number(key))
+      .filter(row => Number.isSafeInteger(row) && row >= 2);
+
+    try {
+      const summary = await runBulkLeadStatusUpdates({
+        projectId,
+        rowNumbers,
+        status: target,
+        concurrency: BULK_STATUS_CONCURRENCY,
+        updateLeadStatus: (pid, row, nextStatus) => api.updateLeadStatus(pid, row, nextStatus),
+        onProgress: ({ completed, total }) => {
+          if (!mountedRef.current) return;
+          setBulkProgress(`Updating ${completed} of ${total}...`);
+        }
+      });
+
+      if (mountedRef.current) {
+        setBulkResult(formatBulkStatusResult(summary));
+        exitSelectionMode();
+      }
+
+      await load("focus");
+    } finally {
+      bulkInFlight.current = false;
+      if (mountedRef.current) {
+        setBulkBusy(false);
+        setBulkProgress(null);
+      }
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={["bottom"]}>
       <Stack.Screen options={{ title: projectName }} />
@@ -153,6 +312,7 @@ export default function ProjectLeadsScreen() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Clear status filter"
+              disabled={bulkBusy}
               onPress={clearStatusFilter}
             >
               <Text style={styles.clearFiltersText}>Clear</Text>
@@ -163,7 +323,11 @@ export default function ProjectLeadsScreen() {
         <TextInput
           style={styles.search}
           value={query}
-          onChangeText={setQuery}
+          onChangeText={text => {
+            if (bulkBusy) return;
+            setQuery(text);
+          }}
+          editable={!bulkBusy}
           placeholder="Search by name, phone or email"
           placeholderTextColor={colors.textMuted}
           autoCapitalize="none"
@@ -180,8 +344,9 @@ export default function ProjectLeadsScreen() {
                 key={option}
                 style={[styles.chip, active && styles.chipActive]}
                 accessibilityRole="button"
-                accessibilityState={{ selected: active }}
+                accessibilityState={{ selected: active, disabled: bulkBusy }}
                 accessibilityLabel={`Filter ${option}`}
+                disabled={bulkBusy}
                 onPress={() => selectStatus(option)}
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{option}</Text>
@@ -195,10 +360,112 @@ export default function ProjectLeadsScreen() {
             style={styles.clearFilters}
             accessibilityRole="button"
             accessibilityLabel="Clear filters"
+            disabled={bulkBusy}
             onPress={clearFilters}
           >
             <Text style={styles.clearFiltersText}>Clear Filters</Text>
           </Pressable>
+        ) : null}
+
+        <View style={styles.selectionBar}>
+          {!selectionMode ? (
+            <Pressable
+              style={styles.selectionBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Select leads"
+              disabled={bulkBusy || filtered.length === 0}
+              onPress={enterSelectionMode}
+            >
+              <Text style={styles.selectionBtnText}>Select</Text>
+            </Pressable>
+          ) : (
+            <>
+              <Pressable
+                style={styles.selectionBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel selection"
+                disabled={bulkBusy}
+                onPress={cancelSelection}
+              >
+                <Text style={styles.selectionBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={styles.selectionBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Select all visible leads"
+                disabled={bulkBusy || filtered.length === 0}
+                onPress={selectAllVisible}
+              >
+                <Text style={styles.selectionBtnText}>Select All</Text>
+              </Pressable>
+              <Pressable
+                style={styles.selectionBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Clear selection"
+                disabled={bulkBusy || selectedCount === 0}
+                onPress={clearSelectionOnly}
+              >
+                <Text style={styles.selectionBtnText}>Clear Selection</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+
+        {selectionMode ? (
+          <View style={styles.bulkBar}>
+            <Text style={styles.selectionCount} accessibilityLabel={selectionLabel}>
+              {selectionLabel}
+            </Text>
+            <Pressable
+              style={[styles.bulkStatusBtn, !bulkEnabled && styles.bulkStatusDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Bulk status update"
+              accessibilityState={{ disabled: !bulkEnabled }}
+              disabled={!bulkEnabled}
+              onPress={openStatusPicker}
+            >
+              <Text style={styles.bulkStatusText}>Bulk Status</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {statusPickerOpen && selectionMode ? (
+          <View style={styles.statusPicker} accessibilityLabel="Choose bulk lead status">
+            <Text style={styles.statusPickerTitle}>Choose status</Text>
+            <View style={styles.filterRow}>
+              {LEAD_STATUSES.map(option => (
+                <Pressable
+                  key={option}
+                  style={styles.chip}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Set status ${option}`}
+                  disabled={bulkBusy}
+                  onPress={() => chooseBulkStatus(option)}
+                >
+                  <Text style={styles.chipText}>{option}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close status picker"
+              disabled={bulkBusy}
+              onPress={() => setStatusPickerOpen(false)}
+            >
+              <Text style={styles.clearFiltersText}>Close</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {bulkProgress ? (
+          <Text style={styles.bulkProgress} accessibilityLabel={bulkProgress}>
+            {bulkProgress}
+          </Text>
+        ) : null}
+        {bulkResult ? (
+          <Text style={styles.bulkResult} accessibilityLabel={bulkResult}>
+            {bulkResult}
+          </Text>
         ) : null}
       </View>
 
@@ -274,13 +541,22 @@ export default function ProjectLeadsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => {
-              void load("refresh");
-            }}
+            onRefresh={onPullRefresh}
             tintColor={colors.accent}
           />
         }
-        renderItem={({ item }) => <LeadCard item={item} onPress={() => openLead(item)} />}
+        renderItem={({ item }) => {
+          const key = selectionKeyFromRowNumber(item.rowNumber);
+          const selected = Boolean(key && selectedKeys.has(key));
+          return (
+            <LeadCard
+              item={item}
+              selectionMode={selectionMode}
+              selected={selected}
+              onPress={() => onLeadPress(item)}
+            />
+          );
+        }}
       />
     </SafeAreaView>
   );
@@ -336,6 +612,53 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.bg },
   clearFilters: { marginTop: 10, alignSelf: "flex-start" },
   clearFiltersText: { color: colors.accent, fontWeight: "700", fontSize: 13 },
+  selectionBar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginTop: 12
+  },
+  selectionBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.card,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 40,
+    justifyContent: "center"
+  },
+  selectionBtnText: { color: colors.text, fontWeight: "700", fontSize: 13 },
+  bulkBar: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  selectionCount: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  bulkStatusBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 40,
+    justifyContent: "center"
+  },
+  bulkStatusDisabled: { opacity: 0.4 },
+  bulkStatusText: { color: colors.bg, fontWeight: "800", fontSize: 13 },
+  statusPicker: {
+    marginTop: 12,
+    backgroundColor: colors.card,
+    borderColor: colors.cardBorder,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 10
+  },
+  statusPickerTitle: { color: colors.text, fontWeight: "700", fontSize: 14 },
+  bulkProgress: { marginTop: 10, color: colors.accent, fontWeight: "700", fontSize: 13 },
+  bulkResult: { marginTop: 10, color: colors.textSoft, fontSize: 13, lineHeight: 18 },
   list: { paddingHorizontal: 16, paddingBottom: 28 },
   center: { alignItems: "center", marginTop: 36, gap: 12, paddingHorizontal: 24 },
   centerText: { color: colors.textMuted, textAlign: "center", fontSize: 15 },
