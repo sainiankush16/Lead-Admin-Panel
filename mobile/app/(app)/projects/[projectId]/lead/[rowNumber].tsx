@@ -18,6 +18,7 @@ import { LeadContactActions } from "@/components/LeadContactActions";
 import { LeadContactRemarkSection } from "@/components/LeadContactRemarkSection";
 import { LeadDetailHeader } from "@/components/LeadDetailHeader";
 import { LeadFollowUpSection } from "@/components/LeadFollowUpSection";
+import { LeadIntelligenceSummary } from "@/components/LeadIntelligenceSummary";
 import { LeadNextActions } from "@/components/LeadNextActions";
 import { LeadRemarksSection } from "@/components/LeadRemarksSection";
 import { LeadSmartNextAction } from "@/components/LeadSmartNextAction";
@@ -550,6 +551,19 @@ export default function LeadDetailScreen() {
                 phone={detail.phone}
                 email={detail.email}
                 status={detail.status}
+              />
+            </View>
+
+            <View onLayout={event => rememberSection("intelligence", event)}>
+              <LeadIntelligenceSummary
+                status={detail.status}
+                name={detail.name}
+                phone={detail.phone}
+                email={detail.email}
+                telHref={detail.telHref}
+                mailtoHref={detail.mailtoHref}
+                timelineEvents={timelineEvents}
+                remarks={remarks}
               />
             </View>
 
