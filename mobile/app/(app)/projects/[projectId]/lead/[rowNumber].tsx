@@ -13,6 +13,8 @@ import {
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { LeadContactActions } from "@/components/LeadContactActions";
+import { LeadContactRemarkSection } from "@/components/LeadContactRemarkSection";
 import { LeadFollowUpSection } from "@/components/LeadFollowUpSection";
 import { LeadRemarksSection } from "@/components/LeadRemarksSection";
 import { LeadTimelineSection } from "@/components/LeadTimelineSection";
@@ -21,6 +23,10 @@ import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { api, ApiClientError } from "@/services/api";
 import type { Remark, TimelineEvent } from "@/types";
+import {
+  contactRemarkSuccessMessage,
+  mapContactRemarkError
+} from "@/utils/leadContactActivity";
 import { buildLeadDetail, type LeadDetailModel } from "@/utils/leadDetail";
 import {
   FOLLOW_UP_STATUS,
@@ -44,7 +50,7 @@ import {
   shouldSubmitStatusChange
 } from "@/utils/leadStatusEdit";
 import { mapTimelineLoadError } from "@/utils/leadTimeline";
-import { openCall, openExternalUrl, openWhatsApp } from "@/utils/linking";
+import { openExternalUrl } from "@/utils/linking";
 
 function FieldRow({ label, value }: { label: string; value: string }) {
   return (
@@ -83,6 +89,8 @@ export default function LeadDetailScreen() {
   const [followUpStatusError, setFollowUpStatusError] = useState<string | null>(null);
   const [followUpRemarkMessage, setFollowUpRemarkMessage] = useState<string | null>(null);
   const [followUpRemarkError, setFollowUpRemarkError] = useState<string | null>(null);
+  const [contactRemarkMessage, setContactRemarkMessage] = useState<string | null>(null);
+  const [contactRemarkError, setContactRemarkError] = useState<string | null>(null);
 
   const [timelineEvents, setTimelineEvents] = useState<TimelineEvent[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
@@ -169,6 +177,7 @@ export default function LeadDetailScreen() {
       setRemarkMutationError(null);
       setFollowUpStatusError(null);
       setFollowUpRemarkError(null);
+      setContactRemarkError(null);
       await Promise.all([loadRemarks(), loadTimeline()]);
     } catch (err) {
       if (err instanceof ApiClientError && err.status === 401) {
@@ -348,6 +357,7 @@ export default function LeadDetailScreen() {
     setFollowUpRemarkMessage(null);
     setFollowUpRemarkError(null);
     setRemarkMutationError(null);
+    setContactRemarkError(null);
     try {
       const response = await api.addRemark(projectId, leadId, body);
       if (Array.isArray(response.remarks)) {
@@ -362,6 +372,34 @@ export default function LeadDetailScreen() {
         err instanceof ApiClientError || err instanceof TypeError ? err : null
       );
       setFollowUpRemarkError(mapped.message);
+      if (mapped.clearAuth) setError(mapped.message);
+      throw err;
+    } finally {
+      setRemarkBusy(false);
+    }
+  }
+
+  async function onAddContactRemark(body: string) {
+    if (!leadId || remarkBusy) return;
+    setRemarkBusy(true);
+    setContactRemarkMessage(null);
+    setContactRemarkError(null);
+    setRemarkMutationError(null);
+    setFollowUpRemarkError(null);
+    try {
+      const response = await api.addRemark(projectId, leadId, body);
+      if (Array.isArray(response.remarks)) {
+        setRemarks(response.remarks);
+      } else if (response.remark) {
+        setRemarks(prev => [response.remark, ...prev.filter(item => item.id !== response.remark.id)]);
+      }
+      setContactRemarkMessage(contactRemarkSuccessMessage());
+      void loadTimeline();
+    } catch (err) {
+      const mapped = mapContactRemarkError(
+        err instanceof ApiClientError || err instanceof TypeError ? err : null
+      );
+      setContactRemarkError(mapped.message);
       if (mapped.clearAuth) setError(mapped.message);
       throw err;
     } finally {
@@ -478,30 +516,12 @@ export default function LeadDetailScreen() {
             <Text style={styles.projectName}>{detail.projectName}</Text>
             <Text style={styles.leadName}>{detail.name}</Text>
 
-            <View style={styles.actions}>
-              <Pressable
-                style={[styles.actionBtn, !detail.telHref && styles.disabled]}
-                disabled={!detail.telHref}
-                accessibilityRole="button"
-                accessibilityLabel={`Call ${detail.name}`}
-                onPress={() => {
-                  void openCall(detail.telHref);
-                }}
-              >
-                <Text style={styles.actionText}>Call</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.actionBtn, styles.waBtn, !detail.waHref && styles.disabled]}
-                disabled={!detail.waHref}
-                accessibilityRole="button"
-                accessibilityLabel={`WhatsApp ${detail.name}`}
-                onPress={() => {
-                  void openWhatsApp(detail.waHref);
-                }}
-              >
-                <Text style={[styles.actionText, styles.waText]}>WhatsApp</Text>
-              </Pressable>
-            </View>
+            <LeadContactActions
+              name={detail.name}
+              telHref={detail.telHref}
+              waHref={detail.waHref}
+              mailtoHref={detail.mailtoHref}
+            />
 
             <View style={styles.section}>
               <Text style={styles.sectionLabel}>Phone</Text>
@@ -595,6 +615,13 @@ export default function LeadDetailScreen() {
               }}
             />
 
+            <LeadContactRemarkSection
+              busy={remarkBusy}
+              message={contactRemarkMessage}
+              error={contactRemarkError}
+              onAdd={onAddContactRemark}
+            />
+
             <Text style={styles.infoTitle}>Lead Information</Text>
             {detail.fields.length === 0 ? (
               <Text style={styles.centerText}>No additional fields.</Text>
@@ -647,24 +674,6 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "800"
   },
-  actions: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 18,
-    marginBottom: 18
-  },
-  actionBtn: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#334155"
-  },
-  waBtn: { backgroundColor: colors.accent },
-  disabled: { opacity: 0.35 },
-  actionText: { color: colors.text, fontWeight: "700", fontSize: 15 },
-  waText: { color: colors.bg },
   section: { marginBottom: 16 },
   sectionLabel: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginBottom: 4 },
   sectionValue: { color: colors.text, fontSize: 16, lineHeight: 22 },
