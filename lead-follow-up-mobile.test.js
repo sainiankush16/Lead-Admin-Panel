@@ -84,7 +84,7 @@ test("Lead Detail wires Follow-Up to existing status and remark APIs", () => {
 
   assert.match(component, /followUpConfirmationCopy/);
   assert.match(component, /Add Follow-Up Remark/);
-  assert.match(component, /alreadyFollowUpMessage/);
+  assert.match(component, /followUpActiveGuidance|alreadyFollowUpMessage/);
   assert.equal(followUpConfirmationCopy().title, "Mark this lead for follow-up?");
 });
 

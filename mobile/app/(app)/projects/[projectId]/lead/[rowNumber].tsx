@@ -20,6 +20,7 @@ import { LeadDetailHeader } from "@/components/LeadDetailHeader";
 import { LeadFollowUpSection } from "@/components/LeadFollowUpSection";
 import { LeadNextActions } from "@/components/LeadNextActions";
 import { LeadRemarksSection } from "@/components/LeadRemarksSection";
+import { LeadSmartNextAction } from "@/components/LeadSmartNextAction";
 import { LeadTimelineSection } from "@/components/LeadTimelineSection";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
@@ -549,6 +550,23 @@ export default function LeadDetailScreen() {
                 phone={detail.phone}
                 email={detail.email}
                 status={detail.status}
+              />
+            </View>
+
+            <View onLayout={event => rememberSection("productivity", event)}>
+              <LeadSmartNextAction
+                status={detail.status}
+                telHref={detail.telHref}
+                waHref={detail.waHref}
+                mailtoHref={detail.mailtoHref}
+                timelineEvents={timelineEvents}
+                onSelectQuickStatus={status => {
+                  setSelectedStatus(status);
+                  setStatusMessage(null);
+                  setStatusError(null);
+                  jumpToSection("status");
+                }}
+                onJumpToStatus={() => jumpToSection("status")}
               />
             </View>
 

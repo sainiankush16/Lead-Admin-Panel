@@ -11,13 +11,13 @@ import {
 import { colors } from "@/constants/theme";
 import { MAX_REMARK_LENGTH } from "@/utils/leadRemarks";
 import {
-  alreadyFollowUpMessage,
   canEnableMarkFollowUp,
   canSubmitFollowUpRemark,
   followUpConfirmationCopy,
   isFollowUpStatus,
   validateFollowUpRemarkDraft
 } from "@/utils/leadFollowUp";
+import { followUpActiveGuidance } from "@/utils/leadProductivity";
 
 interface LeadFollowUpSectionProps {
   displayStatus: string;
@@ -110,12 +110,15 @@ export function LeadFollowUpSection({
   return (
     <View style={styles.wrap}>
       <Text style={styles.title}>Follow-Up</Text>
+      <Text style={styles.guidance}>
+        Mark Follow Up when this lead needs continued attention. No dates or reminders — status only.
+      </Text>
 
       {alreadyFollowUp ? (
         <View style={styles.infoCard}>
           <Text style={styles.infoLabel}>Status</Text>
           <Text style={styles.infoValue}>Follow Up</Text>
-          <Text style={styles.infoNote}>{alreadyFollowUpMessage()}</Text>
+          <Text style={styles.infoNote}>{followUpActiveGuidance()}</Text>
         </View>
       ) : confirming ? (
         <View style={styles.confirmCard}>
@@ -257,6 +260,12 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 18,
     fontWeight: "700",
+    marginBottom: 8
+  },
+  guidance: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
     marginBottom: 12
   },
   subtitle: {

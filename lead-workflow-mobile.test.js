@@ -35,6 +35,7 @@ test("lead identity placeholders and status display", () => {
 test("workflow section order and next actions are explicit only", () => {
   assert.deepEqual(WORKFLOW_SECTIONS, [
     "header",
+    "productivity",
     "contact",
     "status",
     "followUp",
@@ -93,6 +94,7 @@ test("Lead Detail wires action-first workflow without sticky bar or new APIs", (
   const pkg = fs.readFileSync(path.join(__dirname, "mobile/package.json"), "utf8");
 
   assert.match(detail, /LeadDetailHeader/);
+  assert.match(detail, /LeadSmartNextAction/);
   assert.match(detail, /LeadNextActions/);
   assert.match(detail, /LeadContactActions/);
   assert.match(detail, /LeadFollowUpSection/);

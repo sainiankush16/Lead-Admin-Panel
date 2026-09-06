@@ -2,6 +2,7 @@
 
 const WORKFLOW_SECTIONS = Object.freeze([
   "header",
+  "productivity",
   "contact",
   "status",
   "followUp",
