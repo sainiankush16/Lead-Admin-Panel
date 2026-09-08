@@ -14,6 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ActionCenterSection } from "@/components/ActionCenterSection";
 import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
 import { ProductivityOverviewCard } from "@/components/ProductivityOverviewCard";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { BRAND_NAME } from "@/constants/branding";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
@@ -242,7 +244,7 @@ export default function DashboardScreen() {
               />
             ) : null}
 
-            <Text style={styles.sectionTitle}>Actionable Leads</Text>
+            <SectionHeader title="Actionable Leads" icon="status" />
             <View style={styles.actionableGrid}>
               {ACTIONABLE_STATUSES.map(status => {
                 const count = summary.actionable[status] || 0;
@@ -256,13 +258,12 @@ export default function DashboardScreen() {
                   >
                     <Text style={styles.actionableName}>{status}</Text>
                     <Text style={styles.actionableCount}>{formatCount(count)}</Text>
-                    <Text style={styles.actionableHint}>View leads</Text>
                   </Pressable>
                 );
               })}
             </View>
 
-            <Text style={styles.sectionTitle}>Projects</Text>
+            <SectionHeader title="Projects" icon="folder" />
             {summary.projects.map(project => (
               <Pressable
                 key={project.projectId}
@@ -271,7 +272,11 @@ export default function DashboardScreen() {
                 accessibilityLabel={`${project.projectName}: ${project.leadCount} leads. Open project`}
                 onPress={() => openProjectLeads(project.projectId)}
               >
-                <Text style={styles.projectName}>{project.projectName}</Text>
+                <View style={styles.projectTitleRow}>
+                  <AppIcon name="folder" size={16} color={colors.accent} />
+                  <Text style={styles.projectName}>{project.projectName}</Text>
+                  <AppIcon name="arrow" size={14} color={colors.textMuted} />
+                </View>
                 <Text style={styles.projectCount}>
                   {formatCount(project.leadCount)} {project.leadCount === 1 ? "Lead" : "Leads"}
                 </Text>
@@ -280,7 +285,6 @@ export default function DashboardScreen() {
                     Follow Up: {formatCount(project.statusCounts["Follow Up"])}
                   </Text>
                 ) : null}
-                <Text style={styles.projectHint}>Open lead list</Text>
               </Pressable>
             ))}
           </>
@@ -401,7 +405,13 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10
   },
+  projectTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
   projectName: {
+    flex: 1,
     color: colors.text,
     fontSize: 16,
     fontWeight: "600"

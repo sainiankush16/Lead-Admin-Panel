@@ -1,5 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { ActionButton } from "@/components/ui/ActionButton";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { colors } from "@/constants/theme";
 import type { LeadStatusValue } from "@/constants/leadStatus";
 import type { TimelineEvent } from "@/types";
@@ -52,37 +54,40 @@ export function LeadSmartNextAction({
   }
 
   const primaryDisabled = summary.primaryAction.type === "none";
+  const primaryIcon =
+    summary.primaryAction.type === "call"
+      ? "call"
+      : summary.primaryAction.type === "email"
+        ? "email"
+        : "status";
 
   return (
     <View style={styles.wrap} accessibilityLabel="Smart next action">
-      <Text style={styles.eyebrow}>Recommended Next Action</Text>
+      <SectionHeader title="Recommended Next Action" icon="play" />
       <Text style={styles.recommendation}>{summary.recommendation}</Text>
       <Text style={styles.stageHint}>{summary.stageHint}</Text>
       <Text style={styles.activity}>{summary.activitySummary}</Text>
 
       <View style={styles.ctaRow}>
-        <Pressable
-          style={[styles.primaryBtn, primaryDisabled && styles.disabled]}
+        <ActionButton
+          label={summary.primaryAction.label}
+          icon={primaryIcon}
+          variant="primary"
           disabled={primaryDisabled}
-          accessibilityRole="button"
           accessibilityLabel={summary.primaryAction.label}
-          accessibilityState={{ disabled: primaryDisabled }}
           onPress={runPrimary}
-        >
-          <Text style={styles.primaryBtnText}>{summary.primaryAction.label}</Text>
-        </Pressable>
+        />
 
         {summary.showWhatsApp ? (
-          <Pressable
-            style={styles.secondaryBtn}
-            accessibilityRole="button"
+          <ActionButton
+            label="WhatsApp"
+            icon="whatsapp"
+            variant="accent"
             accessibilityLabel="WhatsApp Lead"
             onPress={() => {
               void openWhatsApp(waHref);
             }}
-          >
-            <Text style={styles.secondaryBtnText}>WhatsApp</Text>
-          </Pressable>
+          />
         ) : null}
       </View>
 
@@ -121,13 +126,6 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8
   },
-  eyebrow: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.4,
-    textTransform: "uppercase"
-  },
   recommendation: {
     color: colors.text,
     fontSize: 17,
@@ -150,26 +148,6 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 4
   },
-  primaryBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: 10,
-    minHeight: 44,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  primaryBtnText: { color: colors.bg, fontWeight: "800", fontSize: 14 },
-  secondaryBtn: {
-    borderRadius: 10,
-    minHeight: 44,
-    paddingHorizontal: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.bg
-  },
-  secondaryBtnText: { color: colors.textSoft, fontWeight: "700", fontSize: 14 },
   quickBlock: { marginTop: 8, gap: 6 },
   quickTitle: {
     color: colors.textMuted,
@@ -190,6 +168,5 @@ const styles = StyleSheet.create({
     minHeight: 36,
     justifyContent: "center"
   },
-  quickChipText: { color: colors.textSoft, fontWeight: "700", fontSize: 12 },
-  disabled: { opacity: 0.45 }
+  quickChipText: { color: colors.textSoft, fontWeight: "700", fontSize: 12 }
 });

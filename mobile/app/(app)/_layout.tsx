@@ -1,8 +1,10 @@
 import { Redirect, Tabs } from "expo-router";
 import { Text } from "react-native";
 
+import { AppIcon } from "@/components/ui/AppIcon";
 import { ScreenCaptureProtection } from "@/components/ScreenCaptureProtection";
 import { useAuth } from "@/hooks/useAuth";
+import type { AppIconName } from "@/constants/icons";
 import { colors } from "@/constants/theme";
 
 function TabLabel({ label, focused }: { label: string; focused: boolean }) {
@@ -11,6 +13,10 @@ function TabLabel({ label, focused }: { label: string; focused: boolean }) {
       {label}
     </Text>
   );
+}
+
+function TabBarIcon({ name, focused }: { name: AppIconName; focused: boolean }) {
+  return <AppIcon name={name} size={20} color={focused ? colors.tabActive : colors.textMuted} />;
 }
 
 export default function AppTabsLayout() {
@@ -42,6 +48,7 @@ export default function AppTabsLayout() {
           name="index"
           options={{
             title: "Dashboard",
+            tabBarIcon: ({ focused }) => <TabBarIcon name="dashboard" focused={focused} />,
             tabBarLabel: ({ focused }) => <TabLabel label="Dashboard" focused={focused} />
           }}
         />
@@ -50,6 +57,7 @@ export default function AppTabsLayout() {
           options={{
             title: "Projects",
             headerShown: false,
+            tabBarIcon: ({ focused }) => <TabBarIcon name="folder" focused={focused} />,
             tabBarLabel: ({ focused }) => <TabLabel label="Projects" focused={focused} />
           }}
         />
@@ -57,6 +65,7 @@ export default function AppTabsLayout() {
           name="search"
           options={{
             title: "Search",
+            tabBarIcon: ({ focused }) => <TabBarIcon name="search" focused={focused} />,
             tabBarLabel: ({ focused }) => <TabLabel label="Search" focused={focused} />
           }}
         />
@@ -65,6 +74,7 @@ export default function AppTabsLayout() {
           options={{
             title: "Users",
             href: isAdmin ? undefined : null,
+            tabBarIcon: ({ focused }) => <TabBarIcon name="users" focused={focused} />,
             tabBarLabel: ({ focused }) => <TabLabel label="Users" focused={focused} />
           }}
         />
@@ -72,6 +82,7 @@ export default function AppTabsLayout() {
           name="more"
           options={{
             title: "More",
+            tabBarIcon: ({ focused }) => <TabBarIcon name="more" focused={focused} />,
             tabBarLabel: ({ focused }) => <TabLabel label="More" focused={focused} />
           }}
         />

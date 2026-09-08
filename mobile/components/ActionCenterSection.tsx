@@ -1,5 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { ActionButton } from "@/components/ui/ActionButton";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { colors } from "@/constants/theme";
 import {
   ACTION_CENTER_STATUSES,
@@ -29,7 +32,7 @@ export function ActionCenterSection({
 
   return (
     <View style={styles.wrap} accessibilityLabel="Action Center">
-      <Text style={styles.title}>Action Center</Text>
+      <SectionHeader title="Action Center" icon="checklist" />
       <Text style={styles.priority} accessibilityLabel={summary.priority.label}>
         {summary.priority.label}
       </Text>
@@ -55,7 +58,10 @@ export function ActionCenterSection({
           accessibilityLabel={`Work Next Lead: ${workNext.name}, ${workNext.status}, ${workNext.projectName}`}
           onPress={() => onWorkNext(workNext)}
         >
-          <Text style={styles.workNextBtnText}>Work Next Lead</Text>
+          <View style={styles.workNextTitleRow}>
+            <AppIcon name="play" size={16} color={colors.bg} />
+            <Text style={styles.workNextBtnText}>Work Next Lead</Text>
+          </View>
           <Text style={styles.workNextHint}>
             {workNext.status} · {workNext.name} · {workNext.projectName}
           </Text>
@@ -93,7 +99,10 @@ export function ActionCenterSection({
             accessibilityLabel={`${item.status}. ${item.name}. ${item.projectName}. ${item.contactLabel}`}
             onPress={() => onOpenLead(item)}
           >
-            <Text style={styles.itemStatus}>{String(item.status).toUpperCase()}</Text>
+            <View style={styles.itemTop}>
+              <Text style={styles.itemStatus}>{String(item.status).toUpperCase()}</Text>
+              <AppIcon name="arrow" size={14} color={colors.textMuted} />
+            </View>
             <Text style={styles.itemName}>{item.name}</Text>
             <Text style={styles.itemProject}>{item.projectName}</Text>
             <Text style={styles.itemContact}>{item.contactLabel}</Text>
@@ -102,9 +111,17 @@ export function ActionCenterSection({
       )}
 
       {!summary.empty && summary.hasMore ? (
-        <Pressable
-          style={styles.viewAll}
-          accessibilityRole="button"
+        <ActionButton
+          label={
+            filter !== "All"
+              ? `View ${filter}`
+              : summary.priority.status
+                ? `View ${summary.priority.status}`
+                : "View leads"
+          }
+          icon="arrow"
+          variant="ghost"
+          compact
           accessibilityLabel={
             filter !== "All"
               ? `View ${filter} leads`
@@ -113,15 +130,7 @@ export function ActionCenterSection({
                 : "View leads"
           }
           onPress={() => onViewAll(filter === "All" ? summary.priority.status : filter)}
-        >
-          <Text style={styles.viewAllText}>
-            {filter !== "All"
-              ? `View ${filter} leads`
-              : summary.priority.status
-                ? `View ${summary.priority.status} leads`
-                : "View leads"}
-          </Text>
-        </Pressable>
+        />
       ) : null}
     </View>
   );
@@ -137,11 +146,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 4,
     gap: 8
-  },
-  title: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: "800"
   },
   priority: {
     color: colors.accent,
@@ -160,6 +164,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 2
+  },
+  workNextTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
   },
   workNextBtnText: {
     color: colors.bg,
@@ -200,7 +209,9 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     backgroundColor: colors.bg,
     paddingHorizontal: 10,
-    paddingVertical: 8
+    paddingVertical: 8,
+    minHeight: 36,
+    justifyContent: "center"
   },
   chipActive: {
     backgroundColor: colors.accent,
@@ -228,6 +239,12 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 2
   },
+  itemTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8
+  },
   itemStatus: {
     color: colors.accent,
     fontSize: 12,
@@ -247,16 +264,5 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: "600"
-  },
-  viewAll: {
-    marginTop: 4,
-    alignSelf: "flex-start",
-    minHeight: 40,
-    justifyContent: "center"
-  },
-  viewAllText: {
-    color: colors.accent,
-    fontWeight: "800",
-    fontSize: 14
   }
 });

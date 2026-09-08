@@ -24,6 +24,7 @@ import { LeadRemarksSection } from "@/components/LeadRemarksSection";
 import { LeadSmartNextAction } from "@/components/LeadSmartNextAction";
 import { LeadTimelineSection } from "@/components/LeadTimelineSection";
 import { LeadWorkThisLead } from "@/components/LeadWorkThisLead";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
@@ -675,7 +676,10 @@ export default function LeadDetailScreen() {
                     <Text style={styles.saveBtnText}>Saving...</Text>
                   </View>
                 ) : (
-                  <Text style={styles.saveBtnText}>Save Status</Text>
+                  <View style={styles.saveRow}>
+                    <AppIcon name="save" size={18} color={colors.bg} />
+                    <Text style={styles.saveBtnText}>Save Status</Text>
+                  </View>
                 )}
               </Pressable>
 

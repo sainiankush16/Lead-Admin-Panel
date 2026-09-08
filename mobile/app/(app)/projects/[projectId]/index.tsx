@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadCard } from "@/components/LeadCard";
 import { PipelineSummaryCard } from "@/components/PipelineSummaryCard";
+import { ActionButton } from "@/components/ui/ActionButton";
 import { LEAD_STATUSES, type LeadStatusValue } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { api, ApiClientError } from "@/services/api";
@@ -63,6 +64,7 @@ export default function ProjectLeadsScreen() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<string | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkStatusResultView | null>(null);
+  const [statusSummaryOpen, setStatusSummaryOpen] = useState(true);
   const skipNextFocusRefresh = useRef(true);
   const bulkInFlight = useRef(false);
   const mountedRef = useRef(true);
@@ -310,238 +312,249 @@ export default function ProjectLeadsScreen() {
     }
   }
 
-  return (
-    <SafeAreaView style={styles.safe} edges={["bottom"]}>
-      <Stack.Screen options={{ title: projectName }} />
+  const listHeader = (
+    <View style={styles.header}>
+      <Text style={styles.projectTitle}>{projectName}</Text>
+      <Text style={styles.count} accessibilityLabel={countLabel}>
+        {countLabel}
+      </Text>
 
-      <View style={styles.header}>
-        <Text style={styles.projectTitle}>{projectName}</Text>
-        <Text style={styles.count} accessibilityLabel={countLabel}>
-          {countLabel}
-        </Text>
-
-        {!loading && !error && items.length > 0 ? (
-          <PipelineSummaryCard
-            title="Pipeline"
-            counts={pipelineCounts}
-            compact
-            showAttention
-            showHealth={false}
-            onSelectStatus={option => {
-              if (bulkBusy) return;
-              selectStatus(option);
-            }}
-          />
-        ) : null}
-
-        {status !== "All" ? (
-          <View style={styles.activeFilter}>
-            <Text style={styles.activeFilterText}>Status: {status}</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Clear status filter"
-              disabled={bulkBusy}
-              onPress={clearStatusFilter}
-            >
-              <Text style={styles.clearFiltersText}>Clear</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        <TextInput
-          style={styles.search}
-          value={query}
-          onChangeText={text => {
-            if (bulkBusy) return;
-            setQuery(text);
-          }}
-          editable={!bulkBusy}
-          placeholder="Search by name, phone or email"
-          placeholderTextColor={colors.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          clearButtonMode="while-editing"
-          accessibilityLabel="Search leads in this project"
-        />
-
-        <View style={styles.filterRow}>
-          {STATUS_FILTERS.map(option => {
-            const active = status === option;
-            return (
-              <Pressable
-                key={option}
-                style={[styles.chip, active && styles.chipActive]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active, disabled: bulkBusy }}
-                accessibilityLabel={`Filter ${option}`}
-                disabled={bulkBusy}
-                onPress={() => selectStatus(option)}
-              >
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{option}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {filtersActive ? (
+      {!loading && !error && items.length > 0 ? (
+        <View style={styles.statusSummaryBlock}>
           <Pressable
-            style={styles.clearFilters}
+            style={styles.statusSummaryToggle}
             accessibilityRole="button"
-            accessibilityLabel="Clear filters"
-            disabled={bulkBusy}
-            onPress={clearFilters}
+            accessibilityLabel={
+              statusSummaryOpen ? "Hide Lead Status summary" : "Show Lead Status summary"
+            }
+            onPress={() => setStatusSummaryOpen(open => !open)}
           >
-            <Text style={styles.clearFiltersText}>Clear Filters</Text>
+            <Text style={styles.statusSummaryToggleText}>
+              {statusSummaryOpen ? "Hide Lead Status" : "Show Lead Status"}
+            </Text>
           </Pressable>
-        ) : null}
-
-        <View style={styles.selectionBar}>
-          {!selectionMode ? (
-            <Pressable
-              style={styles.selectionBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Select leads"
-              disabled={bulkBusy || filtered.length === 0}
-              onPress={enterSelectionMode}
-            >
-              <Text style={styles.selectionBtnText}>Select</Text>
-            </Pressable>
-          ) : (
-            <>
-              <Pressable
-                style={styles.selectionBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel selection"
-                disabled={bulkBusy}
-                onPress={cancelSelection}
-              >
-                <Text style={styles.selectionBtnText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                style={styles.selectionBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Select all visible leads"
-                disabled={bulkBusy || filtered.length === 0}
-                onPress={selectAllVisible}
-              >
-                <Text style={styles.selectionBtnText}>Select All</Text>
-              </Pressable>
-              <Pressable
-                style={styles.selectionBtn}
-                accessibilityRole="button"
-                accessibilityLabel="Clear selection"
-                disabled={bulkBusy || selectedCount === 0}
-                onPress={clearSelectionOnly}
-              >
-                <Text style={styles.selectionBtnText}>Clear Selection</Text>
-              </Pressable>
-            </>
-          )}
+          {statusSummaryOpen ? (
+            <PipelineSummaryCard
+              title="Lead Status"
+              counts={pipelineCounts}
+              compact
+              showAttention={false}
+              showHealth={false}
+              onSelectStatus={option => {
+                if (bulkBusy) return;
+                selectStatus(option);
+              }}
+            />
+          ) : null}
         </View>
+      ) : null}
 
-        {selectionMode ? (
-          <View style={styles.bulkBar}>
-            <Text style={styles.selectionCount} accessibilityLabel={selectionLabel}>
-              {selectionLabel}
-            </Text>
-            <Pressable
-              style={[styles.bulkStatusBtn, !bulkEnabled && styles.bulkStatusDisabled]}
-              accessibilityRole="button"
-              accessibilityLabel="Bulk status update"
-              accessibilityState={{ disabled: !bulkEnabled }}
-              disabled={!bulkEnabled}
-              onPress={openStatusPicker}
-            >
-              <Text style={styles.bulkStatusText}>Bulk Status</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {statusPickerOpen && selectionMode ? (
-          <View style={styles.statusPicker} accessibilityLabel="Choose bulk lead status">
-            <Text style={styles.statusPickerTitle}>Choose status</Text>
-            <View style={styles.filterRow}>
-              {LEAD_STATUSES.map(option => (
-                <Pressable
-                  key={option}
-                  style={styles.chip}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Set status ${option}`}
-                  disabled={bulkBusy}
-                  onPress={() => chooseBulkStatus(option)}
-                >
-                  <Text style={styles.chipText}>{option}</Text>
-                </Pressable>
-              ))}
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close status picker"
-              disabled={bulkBusy}
-              onPress={() => setStatusPickerOpen(false)}
-            >
-              <Text style={styles.clearFiltersText}>Close</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {bulkProgress ? (
-          <Text style={styles.bulkProgress} accessibilityLabel={bulkProgress}>
-            {bulkProgress}
-          </Text>
-        ) : null}
-
-        {bulkResult ? (
-          <View
-            style={[
-              styles.resultCard,
-              bulkResult.kind === "failure" && styles.resultCardFailure,
-              bulkResult.kind === "partial" && styles.resultCardPartial,
-              bulkResult.kind === "success" && styles.resultCardSuccess
-            ]}
-            accessibilityRole="summary"
-            accessibilityLabel={bulkResult.accessibilityLabel}
+      {status !== "All" ? (
+        <View style={styles.activeFilter}>
+          <Text style={styles.activeFilterText}>Status: {status}</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Clear status filter"
+            disabled={bulkBusy}
+            onPress={clearStatusFilter}
           >
-            <Text style={styles.resultTitle}>Bulk Status Result</Text>
-            <Text
-              style={[
-                styles.resultHeadline,
-                bulkResult.kind === "failure" && styles.resultHeadlineFailure
-              ]}
-            >
-              {bulkResult.headline}
-            </Text>
-            {bulkResult.details.map(line => (
-              <Text key={line} style={styles.resultDetail}>
-                {line}
-              </Text>
-            ))}
-            <Text style={styles.resultTargetLabel}>Target Status</Text>
-            <Text style={styles.resultTargetValue}>{bulkResult.targetStatus}</Text>
-            {bulkResult.retryHint ? (
-              <Text style={styles.resultRetryHint}>{bulkResult.retryHint}</Text>
-            ) : null}
+            <Text style={styles.clearFiltersText}>Clear</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <TextInput
+        style={styles.search}
+        value={query}
+        onChangeText={text => {
+          if (bulkBusy) return;
+          setQuery(text);
+        }}
+        editable={!bulkBusy}
+        placeholder="Search by name, phone or email"
+        placeholderTextColor={colors.textMuted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        clearButtonMode="while-editing"
+        accessibilityLabel="Search leads in this project"
+      />
+
+      <View style={styles.filterRow}>
+        {STATUS_FILTERS.map(option => {
+          const active = status === option;
+          return (
             <Pressable
-              style={styles.resultDismiss}
+              key={option}
+              style={[styles.chip, active && styles.chipActive]}
               accessibilityRole="button"
-              accessibilityLabel="Dismiss bulk result"
-              onPress={dismissBulkResult}
+              accessibilityState={{ selected: active, disabled: bulkBusy }}
+              accessibilityLabel={`Filter ${option}`}
+              disabled={bulkBusy}
+              onPress={() => selectStatus(option)}
             >
-              <Text style={styles.resultDismissText}>Dismiss</Text>
+              <Text style={[styles.chipText, active && styles.chipTextActive]}>{option}</Text>
             </Pressable>
-          </View>
-        ) : null}
+          );
+        })}
       </View>
 
+      {filtersActive ? (
+        <Pressable
+          style={styles.clearFilters}
+          accessibilityRole="button"
+          accessibilityLabel="Clear filters"
+          disabled={bulkBusy}
+          onPress={clearFilters}
+        >
+          <Text style={styles.clearFiltersText}>Clear Filters</Text>
+        </Pressable>
+      ) : null}
+
+      <View style={styles.selectionBar}>
+        {!selectionMode ? (
+          <ActionButton
+            label="Select"
+            icon="checkboxOutline"
+            variant="ghost"
+            compact
+            disabled={bulkBusy || filtered.length === 0}
+            accessibilityLabel="Select leads"
+            onPress={enterSelectionMode}
+          />
+        ) : (
+          <>
+            <ActionButton
+              label="Cancel"
+              icon="clear"
+              variant="ghost"
+              compact
+              disabled={bulkBusy}
+              accessibilityLabel="Cancel selection"
+              onPress={cancelSelection}
+            />
+            <ActionButton
+              label="Select All"
+              icon="checkbox"
+              variant="ghost"
+              compact
+              disabled={bulkBusy || filtered.length === 0}
+              accessibilityLabel="Select all visible leads"
+              onPress={selectAllVisible}
+            />
+            <ActionButton
+              label="Clear Selection"
+              icon="clear"
+              variant="ghost"
+              compact
+              disabled={bulkBusy || selectedCount === 0}
+              accessibilityLabel="Clear selection"
+              onPress={clearSelectionOnly}
+            />
+          </>
+        )}
+      </View>
+
+      {selectionMode ? (
+        <View style={styles.bulkBar}>
+          <Text style={styles.selectionCount} accessibilityLabel={selectionLabel}>
+            {selectionLabel}
+          </Text>
+          <ActionButton
+            label="Bulk Status"
+            icon="edit"
+            variant="primary"
+            compact
+            disabled={!bulkEnabled}
+            accessibilityLabel="Bulk status update"
+            onPress={openStatusPicker}
+          />
+        </View>
+      ) : null}
+
+      {statusPickerOpen && selectionMode ? (
+        <View style={styles.statusPicker} accessibilityLabel="Choose bulk lead status">
+          <Text style={styles.statusPickerTitle}>Choose status</Text>
+          <View style={styles.filterRow}>
+            {LEAD_STATUSES.map(option => (
+              <Pressable
+                key={option}
+                style={styles.chip}
+                accessibilityRole="button"
+                accessibilityLabel={`Set status ${option}`}
+                disabled={bulkBusy}
+                onPress={() => chooseBulkStatus(option)}
+              >
+                <Text style={styles.chipText}>{option}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close status picker"
+            disabled={bulkBusy}
+            onPress={() => setStatusPickerOpen(false)}
+          >
+            <Text style={styles.clearFiltersText}>Close</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {bulkProgress ? (
+        <Text style={styles.bulkProgress} accessibilityLabel={bulkProgress}>
+          {bulkProgress}
+        </Text>
+      ) : null}
+
+      {bulkResult ? (
+        <View
+          style={[
+            styles.resultCard,
+            bulkResult.kind === "failure" && styles.resultCardFailure,
+            bulkResult.kind === "partial" && styles.resultCardPartial,
+            bulkResult.kind === "success" && styles.resultCardSuccess
+          ]}
+          accessibilityRole="summary"
+          accessibilityLabel={bulkResult.accessibilityLabel}
+        >
+          <Text style={styles.resultTitle}>Bulk Status Result</Text>
+          <Text
+            style={[
+              styles.resultHeadline,
+              bulkResult.kind === "failure" && styles.resultHeadlineFailure
+            ]}
+          >
+            {bulkResult.headline}
+          </Text>
+          {bulkResult.details.map(line => (
+            <Text key={line} style={styles.resultDetail}>
+              {line}
+            </Text>
+          ))}
+          <Text style={styles.resultTargetLabel}>Target Status</Text>
+          <Text style={styles.resultTargetValue}>{bulkResult.targetStatus}</Text>
+          {bulkResult.retryHint ? (
+            <Text style={styles.resultRetryHint}>{bulkResult.retryHint}</Text>
+          ) : null}
+          <Pressable
+            style={styles.resultDismiss}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss bulk result"
+            onPress={dismissBulkResult}
+          >
+            <Text style={styles.resultDismissText}>Dismiss</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {loading && !items.length ? (
-        <View style={styles.center}>
+        <View style={styles.centerInline}>
           <ActivityIndicator color={colors.accent} size="large" />
           <Text style={styles.centerText}>Loading leads...</Text>
         </View>
       ) : null}
 
       {error && !loading ? (
-        <View style={styles.center}>
+        <View style={styles.centerInline}>
           <Text style={styles.error}>{error}</Text>
           {forbidden ? (
             <Pressable
@@ -568,7 +581,7 @@ export default function ProjectLeadsScreen() {
       ) : null}
 
       {!loading && !error && items.length === 0 ? (
-        <View style={styles.center}>
+        <View style={styles.centerInline}>
           <Text style={styles.centerText}>No leads found for this project.</Text>
           <Pressable
             style={styles.retry}
@@ -584,7 +597,7 @@ export default function ProjectLeadsScreen() {
       ) : null}
 
       {!loading && !error && items.length > 0 && filtered.length === 0 ? (
-        <View style={styles.center}>
+        <View style={styles.centerInline}>
           <Text style={styles.centerText}>No matching leads</Text>
           <Pressable
             style={styles.retry}
@@ -596,10 +609,18 @@ export default function ProjectLeadsScreen() {
           </Pressable>
         </View>
       ) : null}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.safe} edges={["bottom"]}>
+      <Stack.Screen options={{ title: projectName }} />
 
       <FlatList
-        data={filtered}
+        style={styles.listFlex}
+        data={!loading && !error ? filtered : []}
         keyExtractor={item => item.leadId}
+        ListHeaderComponent={listHeader}
         contentContainerStyle={styles.list}
         keyboardShouldPersistTaps="handled"
         refreshControl={
@@ -628,9 +649,19 @@ export default function ProjectLeadsScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
+  listFlex: { flex: 1 },
+  header: { paddingTop: 8, paddingBottom: 8 },
   projectTitle: { color: colors.text, fontSize: 22, fontWeight: "700" },
-  count: { marginTop: 4, marginBottom: 12, color: colors.textMuted, fontSize: 14 },
+  count: { marginTop: 4, marginBottom: 8, color: colors.textMuted, fontSize: 14 },
+  statusSummaryBlock: { marginBottom: 4 },
+  statusSummaryToggle: {
+    alignSelf: "flex-start",
+    minHeight: 36,
+    justifyContent: "center",
+    marginBottom: 4
+  },
+  statusSummaryToggleText: { color: colors.accent, fontWeight: "700", fontSize: 13 },
+  centerInline: { alignItems: "center", marginTop: 24, gap: 12, paddingVertical: 12 },
   activeFilter: {
     flexDirection: "row",
     alignItems: "center",
@@ -790,7 +821,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 13
   },
-  list: { paddingHorizontal: 16, paddingBottom: 28 },
+  list: { paddingHorizontal: 16, paddingBottom: 28, flexGrow: 1 },
   center: { alignItems: "center", marginTop: 36, gap: 12, paddingHorizontal: 24 },
   centerText: { color: colors.textMuted, textAlign: "center", fontSize: 15 },
   error: { color: colors.danger, textAlign: "center", fontSize: 15 },

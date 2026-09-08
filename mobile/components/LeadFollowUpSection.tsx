@@ -9,6 +9,7 @@ import {
 } from "react-native";
 
 import { colors } from "@/constants/theme";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { MAX_REMARK_LENGTH } from "@/utils/leadRemarks";
 import {
   canEnableMarkFollowUp,
@@ -163,7 +164,10 @@ export function LeadFollowUpSection({
           accessibilityState={{ disabled: !canMark, busy: statusSaving }}
           onPress={openConfirm}
         >
-          <Text style={styles.primaryBtnText}>Follow Up</Text>
+          <View style={styles.saveRow}>
+            <AppIcon name="status" size={16} color={colors.bg} />
+            <Text style={styles.primaryBtnText}>Follow Up</Text>
+          </View>
         </Pressable>
       )}
 
@@ -244,7 +248,10 @@ export function LeadFollowUpSection({
           accessibilityLabel="Add Follow-Up Remark"
           onPress={openRemark}
         >
-          <Text style={styles.linkBtnText}>Add Follow-Up Remark</Text>
+          <View style={styles.saveRow}>
+            <AppIcon name="note" size={16} color={colors.accent} />
+            <Text style={styles.linkBtnText}>Add Follow-Up Remark</Text>
+          </View>
         </Pressable>
       )}
 

@@ -14,6 +14,8 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LeadSearchResultCard } from "@/components/LeadSearchResultCard";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { LEAD_STATUSES } from "@/constants/leadStatus";
 import { colors } from "@/constants/theme";
 import { useMountedRef } from "@/hooks/useMountedRef";
@@ -153,59 +155,57 @@ export default function SearchScreen() {
         <Text style={styles.subtitle}>Search leads across your authorized projects</Text>
 
         <View style={styles.searchRow}>
-          <TextInput
-            style={styles.input}
-            value={state.query}
-            onChangeText={text => {
-              setState(prev => ({ ...prev, query: text }));
-              setLocalValidation(null);
-            }}
-            placeholder="Search leads..."
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            maxLength={MAX_QUERY_LENGTH}
-            editable={!state.searching}
-            accessibilityLabel="Search leads by name, phone, or email"
-            onSubmitEditing={() => {
-              void runSearch();
-            }}
-          />
-          {state.query.length > 0 ? (
-            <Pressable
-              style={styles.clearBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search query"
-              disabled={state.searching}
-              onPress={onClearQuery}
-            >
-              <Text style={styles.clearText}>Clear</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.inputWrap}>
+            <AppIcon name="search" size={18} color={colors.textMuted} />
+            <TextInput
+              style={styles.input}
+              value={state.query}
+              onChangeText={text => {
+                setState(prev => ({ ...prev, query: text }));
+                setLocalValidation(null);
+              }}
+              placeholder="Search leads..."
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              maxLength={MAX_QUERY_LENGTH}
+              editable={!state.searching}
+              accessibilityLabel="Search leads by name, phone, or email"
+              onSubmitEditing={() => {
+                void runSearch();
+              }}
+            />
+            {state.query.length > 0 ? (
+              <Pressable
+                style={styles.clearIconBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Clear search query"
+                disabled={state.searching}
+                onPress={onClearQuery}
+              >
+                <AppIcon name="clear" size={18} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
+          </View>
         </View>
 
-        <Pressable
-          style={[styles.searchBtn, !submitEnabled && styles.disabled]}
+        <ActionButton
+          label={state.searching ? "Searching..." : "Search"}
+          icon="search"
+          variant="primary"
           disabled={!submitEnabled}
-          accessibilityRole="button"
+          busy={state.searching}
           accessibilityLabel="Search leads"
-          accessibilityState={{ disabled: !submitEnabled, busy: state.searching }}
           onPress={() => {
             void runSearch();
           }}
-        >
-          {state.searching ? (
-            <View style={styles.searchingRow}>
-              <ActivityIndicator color={colors.bg} />
-              <Text style={styles.searchBtnText}>Searching...</Text>
-            </View>
-          ) : (
-            <Text style={styles.searchBtnText}>Search</Text>
-          )}
-        </Pressable>
+        />
 
-        <Text style={styles.filterLabel}>Project: {selectedProjectLabel}</Text>
+        <View style={styles.filterHeader}>
+          <AppIcon name="filter" size={14} color={colors.textMuted} />
+          <Text style={styles.filterLabel}>Project: {selectedProjectLabel}</Text>
+        </View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -270,14 +270,15 @@ export default function SearchScreen() {
         </ScrollView>
 
         {filtersActive ? (
-          <Pressable
-            style={styles.clearFilters}
-            accessibilityRole="button"
+          <ActionButton
+            label="Clear Filters"
+            icon="clear"
+            variant="ghost"
+            compact
             accessibilityLabel="Clear filters"
             onPress={onClearFilters}
-          >
-            <Text style={styles.clearFiltersText}>Clear Filters</Text>
-          </Pressable>
+            style={styles.clearFilters}
+          />
         ) : null}
 
         {projectsError ? <Text style={styles.error}>{projectsError}</Text> : null}
@@ -348,40 +349,41 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 8 },
   title: { color: colors.text, fontSize: 28, fontWeight: "800" },
   subtitle: { marginTop: 6, marginBottom: 16, color: colors.textMuted, fontSize: 14 },
-  searchRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  input: {
-    flex: 1,
+  searchRow: { marginBottom: 10 },
+  inputWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     minHeight: 48,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.cardBorder,
     backgroundColor: colors.card,
-    color: colors.text,
-    paddingHorizontal: 14,
-    fontSize: 16
+    paddingHorizontal: 12
   },
-  clearBtn: {
+  input: {
+    flex: 1,
     minHeight: 44,
-    justifyContent: "center",
-    paddingHorizontal: 4
+    color: colors.text,
+    fontSize: 16,
+    paddingVertical: 8
   },
-  clearText: { color: colors.accent, fontWeight: "700" },
-  searchBtn: {
-    marginTop: 12,
-    backgroundColor: colors.accent,
-    borderRadius: 10,
-    minHeight: 48,
+  clearIconBtn: {
+    width: 36,
+    height: 36,
     alignItems: "center",
     justifyContent: "center"
   },
-  searchBtnText: { color: colors.bg, fontWeight: "800", fontSize: 16 },
-  searchingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  disabled: { opacity: 0.4 },
-  filterLabel: {
+  filterHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     marginTop: 14,
-    marginBottom: 8,
-    color: colors.textSoft,
-    fontSize: 13,
+    marginBottom: 8
+  },
+  filterLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
     fontWeight: "700"
   },
   filterRow: { gap: 8, paddingBottom: 4 },
@@ -391,6 +393,8 @@ const styles = StyleSheet.create({
     borderColor: colors.cardBorder,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    minHeight: 36,
+    justifyContent: "center",
     backgroundColor: colors.card
   },
   chipActive: {
@@ -400,7 +404,6 @@ const styles = StyleSheet.create({
   chipText: { color: colors.textSoft, fontSize: 12, fontWeight: "600" },
   chipTextActive: { color: colors.bg },
   clearFilters: { marginTop: 10, alignSelf: "flex-start" },
-  clearFiltersText: { color: colors.accent, fontWeight: "700", fontSize: 13 },
   error: { marginTop: 10, color: colors.danger, fontSize: 13 },
   errorBlock: { marginTop: 4, gap: 8 },
   retryBtn: {

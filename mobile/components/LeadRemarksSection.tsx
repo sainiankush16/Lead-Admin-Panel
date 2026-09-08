@@ -11,6 +11,8 @@ import {
   View
 } from "react-native";
 
+import { ActionButton } from "@/components/ui/ActionButton";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { colors } from "@/constants/theme";
 import type { Remark, User } from "@/types";
 import {
@@ -115,7 +117,7 @@ export function LeadRemarksSection({
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={styles.wrap}
     >
-      <Text style={styles.title}>Remarks</Text>
+      <SectionHeader title="Remarks" icon="note" />
 
       {loading ? (
         <View style={styles.loadingRow}>
@@ -154,22 +156,24 @@ export function LeadRemarksSection({
                 <Text style={styles.timestamp}>{formatRemarkTimestamp(remark.createdAt)}</Text>
                 {editable ? (
                   <View style={styles.cardActions}>
-                    <Pressable
-                      accessibilityRole="button"
+                    <ActionButton
+                      label="Edit"
+                      icon="edit"
+                      variant="ghost"
+                      compact
+                      disabled={busy || mode !== "closed"}
                       accessibilityLabel="Edit remark"
-                      disabled={busy || mode !== "closed"}
                       onPress={() => openEdit(remark)}
-                    >
-                      <Text style={styles.linkAction}>Edit</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Delete remark"
+                    />
+                    <ActionButton
+                      label="Delete"
+                      icon="delete"
+                      variant="danger"
+                      compact
                       disabled={busy || mode !== "closed"}
+                      accessibilityLabel="Delete remark"
                       onPress={() => confirmDelete(remark)}
-                    >
-                      <Text style={styles.dangerAction}>Delete</Text>
-                    </Pressable>
+                    />
                   </View>
                 ) : null}
               </View>
@@ -178,15 +182,14 @@ export function LeadRemarksSection({
         : null}
 
       {mode === "closed" ? (
-        <Pressable
-          style={[styles.addBtn, (busy || loading) && styles.disabled]}
+        <ActionButton
+          label="Add Remark"
+          icon="add"
+          variant="primary"
           disabled={busy || loading}
-          accessibilityRole="button"
           accessibilityLabel="Add Remark"
           onPress={openAdd}
-        >
-          <Text style={styles.addBtnText}>+ Add Remark</Text>
-        </Pressable>
+        />
       ) : (
         <View style={styles.composer}>
           <Text style={styles.composerTitle}>{mode === "add" ? "Add Remark" : "Edit Remark"}</Text>
@@ -207,36 +210,29 @@ export function LeadRemarksSection({
           />
           {localError ? <Text style={styles.errorText}>{localError}</Text> : null}
           <View style={styles.composerActions}>
-            <Pressable
-              style={styles.secondaryBtn}
+            <ActionButton
+              label="Cancel"
+              icon="clear"
+              variant="ghost"
+              compact
               disabled={busy}
-              accessibilityRole="button"
               accessibilityLabel="Cancel remark"
               onPress={closeComposer}
-            >
-              <Text style={styles.secondaryBtnText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.primaryBtn, !submitEnabled && styles.disabled]}
+            />
+            <ActionButton
+              label={mode === "add" ? "Save Remark" : "Save Changes"}
+              icon="save"
+              variant="primary"
+              compact
               disabled={!submitEnabled}
-              accessibilityRole="button"
-              accessibilityLabel={busy ? "Saving remark" : mode === "add" ? "Save Remark" : "Save Changes"}
-              accessibilityState={{ disabled: !submitEnabled, busy }}
+              busy={busy}
+              accessibilityLabel={
+                busy ? "Saving remark" : mode === "add" ? "Save Remark" : "Save Changes"
+              }
               onPress={() => {
                 void onSave();
               }}
-            >
-              {busy ? (
-                <View style={styles.saveRow}>
-                  <ActivityIndicator color={colors.bg} />
-                  <Text style={styles.primaryBtnText}>Saving...</Text>
-                </View>
-              ) : (
-                <Text style={styles.primaryBtnText}>
-                  {mode === "add" ? "Save Remark" : "Save Changes"}
-                </Text>
-              )}
-            </Pressable>
+            />
           </View>
         </View>
       )}

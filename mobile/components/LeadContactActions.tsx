@@ -1,6 +1,7 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
-import { colors } from "@/constants/theme";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { contactActionAvailability } from "@/utils/leadContactActivity";
 import { openCall, openEmail, openWhatsApp } from "@/utils/linking";
 
@@ -21,44 +22,39 @@ export function LeadContactActions({
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>Contact Actions</Text>
+      <SectionHeader title="Contact" />
       <View style={styles.actions}>
-        <Pressable
-          style={[styles.actionBtn, !availability.canCall && styles.disabled]}
+        <ActionButton
+          label="Call"
+          icon="call"
+          style={styles.action}
           disabled={!availability.canCall}
-          accessibilityRole="button"
           accessibilityLabel={`Call ${name}`}
-          accessibilityState={{ disabled: !availability.canCall }}
           onPress={() => {
             void openCall(availability.telHref);
           }}
-        >
-          <Text style={styles.actionText}>Call</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.waBtn, !availability.canWhatsApp && styles.disabled]}
+        />
+        <ActionButton
+          label="WhatsApp"
+          icon="whatsapp"
+          variant="accent"
+          style={styles.action}
           disabled={!availability.canWhatsApp}
-          accessibilityRole="button"
           accessibilityLabel={`WhatsApp ${name}`}
-          accessibilityState={{ disabled: !availability.canWhatsApp }}
           onPress={() => {
             void openWhatsApp(availability.waHref);
           }}
-        >
-          <Text style={[styles.actionText, styles.waText]}>WhatsApp</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, !availability.canEmail && styles.disabled]}
+        />
+        <ActionButton
+          label="Email"
+          icon="email"
+          style={styles.action}
           disabled={!availability.canEmail}
-          accessibilityRole="button"
           accessibilityLabel={`Email ${name}`}
-          accessibilityState={{ disabled: !availability.canEmail }}
           onPress={() => {
             void openEmail(availability.mailtoHref);
           }}
-        >
-          <Text style={styles.actionText}>Email</Text>
-        </Pressable>
+        />
       </View>
     </View>
   );
@@ -66,31 +62,13 @@ export function LeadContactActions({
 
 const styles = StyleSheet.create({
   wrap: { marginTop: 18, marginBottom: 18 },
-  title: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-    marginBottom: 10
-  },
   actions: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10
   },
-  actionBtn: {
+  action: {
     flexGrow: 1,
-    flexBasis: "30%",
-    minHeight: 48,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#334155",
-    paddingHorizontal: 8
-  },
-  waBtn: { backgroundColor: colors.accent },
-  disabled: { opacity: 0.35 },
-  actionText: { color: colors.text, fontWeight: "700", fontSize: 14 },
-  waText: { color: colors.bg }
+    flexBasis: "30%"
+  }
 });

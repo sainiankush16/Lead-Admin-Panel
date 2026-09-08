@@ -1,5 +1,8 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { AppIcon } from "@/components/ui/AppIcon";
+import { SectionHeader } from "@/components/ui/SectionHeader";
+import { statusIconName } from "@/constants/icons";
 import { colors } from "@/constants/theme";
 import {
   getPipelineSummary,
@@ -12,6 +15,7 @@ interface PipelineSummaryCardProps {
   onSelectStatus?: (status: string) => void;
   showAttention?: boolean;
   showHealth?: boolean;
+  /** Compact Lead Status layout for Project Leads (icon + name + count). */
   compact?: boolean;
 }
 
@@ -26,16 +30,24 @@ export function PipelineSummaryCard({
   const summary: PipelineSummary = getPipelineSummary(counts);
 
   function renderRow(status: string, count: number) {
+    const icon = statusIconName(status === "Unknown" ? "" : status);
+    const label = onSelectStatus
+      ? `View ${count} ${status} leads`
+      : `${status}: ${count}`;
+
     const content = (
       <>
-        <Text style={styles.rowStatus}>{status}</Text>
-        <Text style={styles.rowCount}>{count}</Text>
+        <View style={styles.rowLeft}>
+          <AppIcon name={icon} size={compact ? 16 : 18} color={colors.accent} />
+          <Text style={[styles.rowStatus, compact && styles.rowStatusCompact]}>{status}</Text>
+        </View>
+        <Text style={[styles.rowCount, compact && styles.rowCountCompact]}>{count}</Text>
       </>
     );
 
     if (!onSelectStatus) {
       return (
-        <View key={status} style={styles.row} accessibilityLabel={`${status}: ${count}`}>
+        <View key={status} style={[styles.row, compact && styles.rowCompact]} accessibilityLabel={label}>
           {content}
         </View>
       );
@@ -44,13 +56,12 @@ export function PipelineSummaryCard({
     return (
       <Pressable
         key={status}
-        style={styles.rowPressable}
+        style={[styles.rowPressable, compact && styles.rowPressableCompact]}
         accessibilityRole="button"
-        accessibilityLabel={`${status}: ${count}. View leads`}
+        accessibilityLabel={label}
         onPress={() => onSelectStatus(status)}
       >
         {content}
-        <Text style={styles.viewHint}>View leads</Text>
       </Pressable>
     );
   }
@@ -60,20 +71,20 @@ export function PipelineSummaryCard({
       style={[styles.wrap, compact && styles.wrapCompact]}
       accessibilityLabel={title}
     >
-      <Text style={styles.title}>{title}</Text>
+      <SectionHeader title={title} icon={compact ? "status" : "pipeline"} />
 
-      {showAttention ? (
+      {!compact && showAttention ? (
         <Text style={styles.attention} accessibilityLabel={`Attention ${summary.attention.label}`}>
           Attention: {summary.attention.label}
         </Text>
       ) : null}
 
-      {showHealth ? <Text style={styles.health}>{summary.health}</Text> : null}
+      {!compact && showHealth ? <Text style={styles.health}>{summary.health}</Text> : null}
 
-      <Text style={styles.groupLabel}>Active</Text>
+      <Text style={[styles.groupLabel, compact && styles.groupLabelCompact]}>Active</Text>
       {summary.active.map(item => renderRow(item.status, item.count))}
 
-      <Text style={styles.groupLabel}>Closed</Text>
+      <Text style={[styles.groupLabel, compact && styles.groupLabelCompact]}>Closed</Text>
       {summary.terminal.map(item => renderRow(item.status, item.count))}
 
       {summary.unknownStatusCount > 0
@@ -94,14 +105,9 @@ const styles = StyleSheet.create({
     gap: 6
   },
   wrapCompact: {
-    padding: 12,
-    marginBottom: 10
-  },
-  title: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: "800",
-    marginBottom: 2
+    padding: 10,
+    marginBottom: 10,
+    gap: 2
   },
   attention: {
     color: colors.accent,
@@ -123,6 +129,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: "uppercase"
   },
+  groupLabelCompact: {
+    marginTop: 8,
+    marginBottom: 2,
+    fontSize: 10
+  },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -130,32 +141,46 @@ const styles = StyleSheet.create({
     minHeight: 32,
     paddingVertical: 4
   },
+  rowCompact: {
+    minHeight: 28,
+    paddingVertical: 2
+  },
   rowPressable: {
     flexDirection: "row",
-    flexWrap: "wrap",
     justifyContent: "space-between",
     alignItems: "center",
     minHeight: 40,
-    paddingVertical: 6,
-    gap: 4
+    paddingVertical: 6
+  },
+  rowPressableCompact: {
+    minHeight: 32,
+    paddingVertical: 4
+  },
+  rowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
+    flexGrow: 1,
+    paddingRight: 8
   },
   rowStatus: {
     color: colors.textSoft,
     fontSize: 14,
     fontWeight: "600",
-    flexGrow: 1
+    flexShrink: 1
+  },
+  rowStatusCompact: {
+    fontSize: 13
   },
   rowCount: {
     color: colors.text,
     fontSize: 15,
     fontWeight: "800",
-    minWidth: 36,
+    minWidth: 28,
     textAlign: "right"
   },
-  viewHint: {
-    width: "100%",
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: "600"
+  rowCountCompact: {
+    fontSize: 14
   }
 });

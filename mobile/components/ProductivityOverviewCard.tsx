@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 
+import { SectionHeader } from "@/components/ui/SectionHeader";
 import { colors } from "@/constants/theme";
 import type { ProductivityAnalytics } from "@/utils/productivityAnalytics";
 
@@ -15,7 +16,7 @@ export function ProductivityOverviewCard({ analytics }: ProductivityOverviewCard
   if (analytics.empty) {
     return (
       <View style={styles.wrap} accessibilityLabel="Productivity Overview">
-        <Text style={styles.title}>Productivity Overview</Text>
+        <SectionHeader title="Productivity Overview" icon="productivity" />
         <Text style={styles.empty}>{analytics.emptyLabel}</Text>
       </View>
     );
@@ -27,7 +28,7 @@ export function ProductivityOverviewCard({ analytics }: ProductivityOverviewCard
 
   return (
     <View style={styles.wrap} accessibilityLabel="Productivity Overview">
-      <Text style={styles.title}>Productivity Overview</Text>
+      <SectionHeader title="Productivity Overview" icon="productivity" />
       <Text style={styles.subtitle}>Workload and conversion from current leads</Text>
 
       <View style={styles.metrics}>

@@ -116,10 +116,11 @@ test("Lead List preserves filters and refreshes on focus without new APIs", () =
 
   assert.match(card, /displayLeadListName/);
   assert.match(card, /displayLeadListPhone/);
-  assert.match(card, /displayLeadListEmail/);
   assert.match(card, /displayLeadListStatus/);
   assert.match(card, /openCall/);
   assert.match(card, /openWhatsApp/);
+  assert.match(card, /ActionButton/);
+  assert.doesNotMatch(card, /Tap for details/);
 
   assert.doesNotMatch(api, /\/api\/lead-list|\/api\/workflow/);
   assert.doesNotMatch(server, /app\.(get|post)\("\/api\/(lead-list|workflow)/);

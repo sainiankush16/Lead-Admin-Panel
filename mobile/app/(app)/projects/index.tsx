@@ -12,6 +12,8 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { colors } from "@/constants/theme";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { useAuth } from "@/hooks/useAuth";
 import { useMountedRef } from "@/hooks/useMountedRef";
 import { api, ApiClientError } from "@/services/api";
@@ -67,18 +69,21 @@ export default function ProjectsScreen() {
     <SafeAreaView style={styles.safe} edges={["top"]}>
       <View style={styles.header}>
         <View style={styles.headerText}>
-          <Text style={styles.title}>Projects</Text>
+          <View style={styles.titleRow}>
+            <AppIcon name="folder" size={22} color={colors.accent} />
+            <Text style={styles.title}>Projects</Text>
+          </View>
           <Text style={styles.subtitle}>Select a project to view leads</Text>
         </View>
         {isAdmin ? (
-          <Pressable
-            style={styles.addBtn}
-            accessibilityRole="button"
+          <ActionButton
+            label="Add"
+            icon="add"
+            variant="primary"
+            compact
             accessibilityLabel="Add Project"
             onPress={() => router.push("/projects/new")}
-          >
-            <Text style={styles.addBtnText}>+ Add Project</Text>
-          </Pressable>
+          />
         ) : null}
       </View>
 
@@ -133,14 +138,18 @@ export default function ProjectsScreen() {
                 router.push(`/projects/${item.id}`);
               }}
             >
-              <Text style={styles.cardTitle}>{item.name}</Text>
+              <View style={styles.cardTitleRow}>
+                <AppIcon name="folder" size={18} color={colors.accent} />
+                <Text style={styles.cardTitle}>{item.name}</Text>
+                <AppIcon name="arrow" size={14} color={colors.textMuted} />
+              </View>
               {item.spreadsheetName ? (
                 <Text style={styles.meta}>{item.spreadsheetName}</Text>
               ) : null}
               {item.lastSync ? (
                 <Text style={styles.meta}>Last sync: {new Date(item.lastSync).toLocaleString()}</Text>
               ) : (
-                <Text style={styles.meta}>Tap to View Leads</Text>
+                <Text style={styles.meta}>Open leads</Text>
               )}
             </Pressable>
             {isAdmin ? (
@@ -169,6 +178,7 @@ const styles = StyleSheet.create({
     gap: 12
   },
   headerText: { gap: 4 },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   title: { color: colors.text, fontSize: 28, fontWeight: "800" },
   subtitle: { color: colors.textMuted, fontSize: 14 },
   addBtn: {
@@ -189,7 +199,12 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12
   },
-  cardTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
+  cardTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8
+  },
+  cardTitle: { flex: 1, color: colors.text, fontSize: 18, fontWeight: "800" },
   meta: { marginTop: 6, color: colors.textMuted, fontSize: 13 },
   configLink: { marginTop: 12, minHeight: 36, justifyContent: "center" },
   configText: { color: colors.accent, fontWeight: "700" },

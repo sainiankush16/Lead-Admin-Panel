@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 
+import { ActionButton } from "@/components/ui/ActionButton";
 import { colors } from "@/constants/theme";
 import { buildWorkThisLeadSummary } from "@/utils/leadWorkspace";
 import { openCall, openEmail } from "@/utils/linking";
@@ -49,6 +50,12 @@ export function LeadWorkThisLead({
   }
 
   const primaryDisabled = summary.primaryAction.type === "none";
+  const primaryIcon =
+    summary.primaryAction.type === "call"
+      ? "call"
+      : summary.primaryAction.type === "email"
+        ? "email"
+        : "status";
 
   return (
     <View style={styles.wrap} accessibilityLabel="Work this lead">
@@ -64,26 +71,22 @@ export function LeadWorkThisLead({
       <Text style={styles.recommendation}>{summary.recommendation}</Text>
 
       <View style={styles.actions}>
-        <Pressable
-          style={[styles.primaryBtn, primaryDisabled && styles.disabled]}
+        <ActionButton
+          label={summary.primaryAction.label}
+          icon={primaryIcon}
+          variant="primary"
           disabled={primaryDisabled}
-          accessibilityRole="button"
           accessibilityLabel={summary.primaryAction.label}
-          accessibilityState={{ disabled: primaryDisabled }}
           onPress={runPrimary}
-        >
-          <Text style={styles.primaryBtnText}>{summary.primaryAction.label}</Text>
-        </Pressable>
-        <Pressable
-          style={styles.secondaryBtn}
-          accessibilityRole="button"
+        />
+        <ActionButton
+          label="Add Remark"
+          icon="note"
+          variant="ghost"
           accessibilityLabel="Add remark"
           onPress={onJumpToRemarks}
-        >
-          <Text style={styles.secondaryBtnText}>Add Remark</Text>
-        </Pressable>
+        />
       </View>
-      <Text style={styles.hint}>Status changes require Save Status. Contact does not auto-update status.</Text>
     </View>
   );
 }

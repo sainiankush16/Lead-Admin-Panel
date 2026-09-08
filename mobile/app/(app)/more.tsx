@@ -14,6 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { BRAND_NAME, BRAND_TAGLINE } from "@/constants/branding";
 import { colors } from "@/constants/theme";
+import { ActionButton } from "@/components/ui/ActionButton";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { useAuth } from "@/hooks/useAuth";
 import { useMountedRef } from "@/hooks/useMountedRef";
 import { getLegalBaseUrl } from "@/lib/config";
@@ -144,6 +146,10 @@ export default function MoreScreen() {
           </View>
         ) : (
           <View style={styles.card}>
+            <View style={styles.sectionTitleRow}>
+              <AppIcon name="account" size={16} color={colors.accent} />
+              <Text style={styles.inlineSection}>Profile</Text>
+            </View>
             <Text style={styles.label}>Name</Text>
             <Text style={styles.value}>{account.name}</Text>
 
@@ -190,47 +196,40 @@ export default function MoreScreen() {
           {legalLinks.map(link => (
             <Pressable
               key={link.url}
+              style={styles.linkRow}
               accessibilityRole="link"
               accessibilityLabel={link.label}
               onPress={() => {
                 void openExternalUrl(link.url, "Unable to open link.");
               }}
             >
+              <AppIcon name="legal" size={16} color={colors.accent} />
               <Text style={styles.link}>{link.label}</Text>
             </Pressable>
           ))}
         </View>
 
         <Text style={styles.section}>Account Action</Text>
-        <Pressable
-          style={[styles.logoutBtn, actionBusy && styles.disabled]}
+        <ActionButton
+          label="Logout"
+          icon="logout"
+          variant="primary"
           disabled={actionBusy}
-          accessibilityRole="button"
+          busy={busy}
           accessibilityLabel="Logout"
-          accessibilityState={{ busy: actionBusy }}
           onPress={confirmLogout}
-        >
-          {busy ? (
-            <ActivityIndicator color={colors.bg} />
-          ) : (
-            <Text style={styles.logoutText}>Logout</Text>
-          )}
-        </Pressable>
+        />
 
-        <Pressable
-          style={[styles.deleteBtn, actionBusy && styles.disabled]}
+        <ActionButton
+          label="Delete Account"
+          icon="delete"
+          variant="danger"
           disabled={actionBusy}
-          accessibilityRole="button"
+          busy={deleting}
           accessibilityLabel="Delete Account"
-          accessibilityState={{ busy: deleting }}
           onPress={confirmDeleteAccount}
-        >
-          {deleting ? (
-            <ActivityIndicator color={colors.danger} />
-          ) : (
-            <Text style={styles.deleteText}>Delete Account</Text>
-          )}
-        </Pressable>
+          style={styles.deleteBtn}
+        />
         <Text style={styles.deleteHint}>
           Permanent. Removes your Website CRM login. Does not delete Google Sheets or shared lead
           rows.
@@ -277,36 +276,32 @@ const styles = StyleSheet.create({
   tagline: { marginTop: 4, marginBottom: 4, color: colors.textSoft, fontSize: 14 },
   muted: { color: colors.textMuted },
   loadingRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 18 },
+  sectionTitleRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 },
+  inlineSection: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    textTransform: "uppercase"
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 44
+  },
   link: {
     color: colors.accent,
     fontWeight: "700",
-    fontSize: 15,
-    marginVertical: 8
-  },
-  logoutBtn: {
-    backgroundColor: colors.accent,
-    borderRadius: 10,
-    minHeight: 48,
-    alignItems: "center",
-    justifyContent: "center"
+    fontSize: 15
   },
   deleteBtn: {
-    marginTop: 12,
-    borderRadius: 10,
-    minHeight: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.danger,
-    backgroundColor: colors.card
+    marginTop: 12
   },
-  deleteText: { color: colors.danger, fontWeight: "800", fontSize: 16 },
   deleteHint: {
     marginTop: 10,
     color: colors.textMuted,
     fontSize: 12,
     lineHeight: 17
-  },
-  disabled: { opacity: 0.7 },
-  logoutText: { color: colors.bg, fontWeight: "800", fontSize: 16 }
+  }
 });

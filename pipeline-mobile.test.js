@@ -224,8 +224,18 @@ test("mobile screens wire pipeline without AI or backend changes", () => {
   assert.match(dashboard, /resolveActionableLeadTarget/);
 
   assert.match(leadList, /PipelineSummaryCard/);
+  assert.match(leadList, /Lead Status/);
+  assert.match(leadList, /ListHeaderComponent/);
   assert.match(leadList, /getPipelineCounts/);
   assert.match(leadList, /selectionMode|Bulk Status|runBulkLeadStatusUpdates/);
+  assert.doesNotMatch(leadList, /title=["']Pipeline["']/);
+
+  const pipelineCard = fs.readFileSync(
+    path.join(__dirname, "mobile/components/PipelineSummaryCard.tsx"),
+    "utf8"
+  );
+  assert.doesNotMatch(pipelineCard, /View leads/);
+  assert.match(pipelineCard, /statusIconName|AppIcon/);
 
   assert.match(detail, /LeadIntelligenceSummary/);
   assert.match(detail, /onSelectNextStage/);
