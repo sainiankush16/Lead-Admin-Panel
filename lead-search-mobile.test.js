@@ -147,5 +147,8 @@ test("API client searchLeads uses existing global search endpoint", () => {
   const screen = fs.readFileSync(path.join(__dirname, "mobile/app/(app)/search.tsx"), "utf8");
   assert.match(screen, /api\.searchLeads/);
   assert.doesNotMatch(screen, /updateLeadStatus|addRemark|getLeadTimeline/);
-  assert.match(screen, /\/projects\/\$\{.*projectId.*\}\/lead\/\$\{.*rowNumber.*\}|item\.href/);
+  assert.match(
+    screen,
+    /pathname:\s*["']\/projects\/\[projectId\]\/lead\/\[rowNumber\]["']|\/projects\/\$\{.*projectId.*\}\/lead\/\$\{.*rowNumber.*\}|item\.href/
+  );
 });

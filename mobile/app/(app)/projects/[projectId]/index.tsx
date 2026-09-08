@@ -31,7 +31,6 @@ import {
   formatBulkStatusProgress,
   formatLeadListCount,
   formatSelectionCount,
-  leadListDetailHref,
   runBulkLeadStatusUpdates,
   selectAllVisibleLeads,
   selectedLeadCount,
@@ -196,9 +195,12 @@ export default function ProjectLeadsScreen() {
   }
 
   function openLead(item: LeadListItem) {
-    const href = leadListDetailHref(projectId, item.rowNumber);
-    if (!href) return;
-    router.push(href);
+    if (!Number.isSafeInteger(projectId) || projectId <= 0) return;
+    if (!Number.isSafeInteger(item.rowNumber) || item.rowNumber < 2) return;
+    router.push({
+      pathname: "/projects/[projectId]/lead/[rowNumber]",
+      params: { projectId, rowNumber: item.rowNumber }
+    });
   }
 
   function onLeadPress(item: LeadListItem) {

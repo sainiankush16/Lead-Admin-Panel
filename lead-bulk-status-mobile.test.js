@@ -242,7 +242,10 @@ test("Lead List bulk selection UX reuses existing status API without bulk endpoi
   assert.match(screen, /bulkStatusConfirmationCopy/);
   assert.match(screen, /buildBulkStatusResult|formatBulkStatusResult/);
   assert.match(screen, /getProjectLeads/);
-  assert.match(screen, /leadListDetailHref/);
+  assert.match(
+    screen,
+    /pathname:\s*["']\/projects\/\[projectId\]\/lead\/\[rowNumber\]["']|leadListDetailHref/
+  );
   assert.match(screen, /formatBulkStatusProgress|Updating \$\{completed\} of \$\{total\}/);
   assert.match(screen, /bulkInFlight/);
   assert.doesNotMatch(screen, /bulkDelete|Delete Selected/i);

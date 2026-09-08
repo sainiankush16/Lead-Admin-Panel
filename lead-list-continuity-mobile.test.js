@@ -102,7 +102,10 @@ test("Lead List preserves filters and refreshes on focus without new APIs", () =
   assert.match(screen, /load\("focus"\)/);
   assert.match(screen, /filterLeadListItems/);
   assert.match(screen, /formatLeadListCount/);
-  assert.match(screen, /leadListDetailHref/);
+  assert.match(
+    screen,
+    /pathname:\s*["']\/projects\/\[projectId\]\/lead\/\[rowNumber\]["']|leadListDetailHref/
+  );
   assert.match(screen, /getProjectLeads/);
   assert.match(screen, /normalizeLeadListStatusParam/);
   assert.match(screen, /No matching leads/);

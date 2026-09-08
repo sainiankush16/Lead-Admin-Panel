@@ -131,8 +131,12 @@ export default function SearchScreen() {
   }
 
   function openLead(item: MappedSearchResult) {
-    if (!item.href) return;
-    router.push(item.href);
+    if (!Number.isSafeInteger(item.projectId) || item.projectId <= 0) return;
+    if (!Number.isSafeInteger(item.rowNumber) || item.rowNumber < 2) return;
+    router.push({
+      pathname: "/projects/[projectId]/lead/[rowNumber]",
+      params: { projectId: item.projectId, rowNumber: item.rowNumber }
+    });
   }
 
   const selectedProjectLabel =

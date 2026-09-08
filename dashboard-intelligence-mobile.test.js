@@ -136,8 +136,9 @@ test("Dashboard and Lead List wire actionable navigation without new APIs", () =
   assert.match(dashboard, /Actionable Leads/);
   assert.match(dashboard, /ACTIONABLE_STATUSES/);
   assert.match(dashboard, /resolveActionableLeadTarget/);
-  assert.match(dashboard, /buildLeadListPath/);
+  assert.match(dashboard, /normalizeLeadListStatusParam|buildLeadListPath/);
   assert.match(dashboard, /openProjectLeads/);
+  assert.match(dashboard, /pathname:\s*["']\/projects\/\[projectId\]["']/);
   assert.match(dashboard, /getProductivityAnalytics|ProductivityOverviewCard/);
   assert.doesNotMatch(dashboard, /CHATURX|ChaturX|Ankush CRM/);
   assert.doesNotMatch(dashboard, /chart\.js|victory|recharts|firebase|expo-notifications/i);
@@ -149,7 +150,7 @@ test("Dashboard and Lead List wire actionable navigation without new APIs", () =
   assert.match(leadList, /filterLeadListItems/);
   assert.match(
     leadList,
-    /leadListDetailHref\(projectId,\s*item\.rowNumber\)|router\.push\(`\/projects\/\$\{projectId\}\/lead\/\$\{item\.rowNumber\}`\)/
+    /pathname:\s*["']\/projects\/\[projectId\]\/lead\/\[rowNumber\]["']|leadListDetailHref\(projectId,\s*item\.rowNumber\)|router\.push\(`\/projects\/\$\{projectId\}\/lead\/\$\{item\.rowNumber\}`\)/
   );
 
   assert.doesNotMatch(api, /\/api\/dashboard|\/api\/analytics|\/api\/actionable/);

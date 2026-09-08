@@ -93,6 +93,74 @@
             text-align: left;
         }
 
+        .login-android-cta {
+            margin-top: 22px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            text-align: left;
+        }
+
+        .login-android-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 6px;
+        }
+
+        .login-android-support {
+            margin: 0 0 12px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .login-android-btn {
+            width: 100%;
+            min-height: 48px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-decoration: none;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: var(--primary-dark);
+            box-sizing: border-box;
+        }
+
+        .login-android-btn:hover:not(.is-disabled) {
+            background: #dbeafe;
+            border-color: #93c5fd;
+        }
+
+        .login-android-btn:focus-visible,
+        .android-download-nav:focus-visible,
+        .btn:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        .login-android-btn.is-disabled,
+        .android-download-nav.is-disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .android-download-icon {
+            display: inline-flex;
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .android-download-nav {
+            text-decoration: none;
+            color: inherit;
+        }
+
         .checkbox-list {
             display: grid;
             gap: 8px;
@@ -1120,6 +1188,23 @@
             <button class="btn btn-primary login-submit-btn" type="button" id="loginSubmitBtn">Login</button>
             <p class="login-error hidden" id="loginError"></p>
         </form>
+        <div class="login-android-cta">
+            <span class="login-android-label">Available for Android</span>
+            <p class="login-android-support">Manage your leads on the go with Website CRM.</p>
+            <a
+                class="btn login-android-btn is-disabled"
+                id="androidAppDownloadLogin"
+                data-android-app-download
+                href="#"
+                aria-disabled="true"
+                title="Android APK download URL is not configured yet"
+            >
+                <svg class="android-download-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path fill="currentColor" d="M17.6 9.48 19.4 6.4a.5.5 0 0 0-.86-.5l-1.85 3.2A7.9 7.9 0 0 0 12 8c-1.7 0-3.27.53-4.69 1.1L5.46 5.9a.5.5 0 1 0-.86.5l1.8 3.08C4.1 10.9 2.9 13.1 2.9 15.6v.7c0 .9.73 1.63 1.63 1.63h1.1V14a.9.9 0 1 1 1.8 0v3.93h7.14V14a.9.9 0 1 1 1.8 0v3.93h1.1c.9 0 1.63-.73 1.63-1.63v-.7c0-2.5-1.2-4.7-3.5-6.12ZM9.2 13.1a.85.85 0 1 1 0-1.7.85.85 0 0 1 0 1.7Zm5.6 0a.85.85 0 1 1 0-1.7.85.85 0 0 1 0 1.7Z"/>
+                </svg>
+                Download Android App
+            </a>
+        </div>
     </div>
 </div>
 
@@ -1158,6 +1243,16 @@
         </div>
 
         <div class="menu-title">Account</div>
+        <a
+            class="nav-item android-download-nav is-disabled"
+            id="androidAppDownloadNav"
+            data-android-app-download
+            href="#"
+            aria-disabled="true"
+            title="Android APK download URL is not configured yet"
+        >
+            <span class="nav-icon" aria-hidden="true">⬇</span> Download Android App
+        </a>
         <div class="nav-item" data-action="logout" role="button" tabindex="0">
             <span class="nav-icon">↪</span> Logout
         </div>
@@ -1476,6 +1571,8 @@
     </aside>
 </div>
 
+<script src="/site-config.js"></script>
+<script src="/android-download.js"></script>
 <script src="/phone-helpers.js"></script>
 <script src="/app.js" defer></script>
 </body>

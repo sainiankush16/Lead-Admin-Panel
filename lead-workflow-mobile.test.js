@@ -122,7 +122,10 @@ test("Lead Detail wires action-first workflow without sticky bar or new APIs", (
   assert.doesNotMatch(pkg, /expo-notifications|firebase|@react-native-firebase/);
 
   const search = fs.readFileSync(path.join(__dirname, "mobile/app/(app)/search.tsx"), "utf8");
-  assert.match(search, /item\.href|\/projects\/\$\{/);
+  assert.match(
+    search,
+    /pathname:\s*["']\/projects\/\[projectId\]\/lead\/\[rowNumber\]["']|item\.href|\/projects\/\$\{/
+  );
   const dashboard = fs.readFileSync(path.join(__dirname, "mobile/app/(app)/index.tsx"), "utf8");
-  assert.match(dashboard, /buildLeadListPath|resolveActionableLeadTarget/);
+  assert.match(dashboard, /normalizeLeadListStatusParam|buildLeadListPath|resolveActionableLeadTarget/);
 });

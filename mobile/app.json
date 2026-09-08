@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "chaturx",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.chaturx.leads",

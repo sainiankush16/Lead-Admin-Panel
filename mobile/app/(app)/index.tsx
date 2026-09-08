@@ -27,8 +27,8 @@ import {
 } from "@/utils/actionCenter";
 import {
   ACTIONABLE_STATUSES,
-  buildLeadListPath,
   greetingForDate,
+  normalizeLeadListStatusParam,
   resolveActionableLeadTarget,
   type ActionableStatus,
   type DashboardSummary
@@ -100,9 +100,17 @@ export default function DashboardScreen() {
   const displayName = user?.name?.trim() || user?.loginId || "there";
 
   function openProjectLeads(projectId: number, status?: string | null) {
-    const path = buildLeadListPath(projectId, status);
-    if (!path) return;
-    router.push(path);
+    const id = Number(projectId);
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    const normalized = normalizeLeadListStatusParam(status);
+    if (!normalized) {
+      router.push({ pathname: "/projects/[projectId]", params: { projectId: id } });
+      return;
+    }
+    router.push({
+      pathname: "/projects/[projectId]",
+      params: { projectId: id, status: normalized }
+    });
   }
 
   function openActionable(status: ActionableStatus) {
@@ -115,25 +123,34 @@ export default function DashboardScreen() {
   function openPipelineStatus(status: string) {
     if (!summary) return;
     const target = resolvePipelineLeadTarget(summary, status);
-    if (!target?.path) return;
-    router.push(target.path);
+    if (!target) return;
+    openProjectLeads(target.projectId, target.status);
+  }
+
+  function openLeadDetail(projectId: number, rowNumber: number) {
+    const id = Number(projectId);
+    const row = Number(rowNumber);
+    if (!Number.isSafeInteger(id) || id <= 0) return;
+    if (!Number.isSafeInteger(row) || row < 2) return;
+    router.push({
+      pathname: "/projects/[projectId]/lead/[rowNumber]",
+      params: { projectId: id, rowNumber: row }
+    });
   }
 
   function openActionLead(item: ActionCenterItem) {
-    if (!item?.detailHref) return;
-    router.push(item.detailHref);
+    openLeadDetail(item.projectId, item.rowNumber);
   }
 
   function openWorkNextLead(item: ActionCenterItem) {
-    if (!item?.detailHref) return;
-    router.push(item.detailHref);
+    openLeadDetail(item.projectId, item.rowNumber);
   }
 
   function openActionViewAll(status: string | null) {
     if (!summary || !status) return;
     const target = resolvePipelineLeadTarget(summary, status);
-    if (!target?.path) return;
-    router.push(target.path);
+    if (!target) return;
+    openProjectLeads(target.projectId, target.status);
   }
 
   const showMetrics = Boolean(summary && summary.hasProjects);
